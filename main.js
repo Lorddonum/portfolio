@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { Observer } from 'gsap/observer';
+import { Observer } from 'gsap/Observer';
 
 gsap.registerPlugin(ScrollTrigger, Observer);
 // ... existing scene setup ...
