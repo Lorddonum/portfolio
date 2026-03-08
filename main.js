@@ -26,7 +26,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 // --- AUDIO SETUP (native Audio for seek support + Web Audio API for analyser) ---
-const audioEl = new Audio('./groovy deep house mix session.mp3');
+const audioEl = new Audio('/groovy deep house mix session.mp3');
 audioEl.loop = true;
 audioEl.volume = 0.5;
 
