@@ -1,7 +1,20 @@
 import * as THREE from 'three';
-import { gsap, ScrollTrigger, Observer } from 'gsap/all';
+import { gsap } from 'gsap';
+import Observer from 'gsap/Observer';
+import {
+  toggleSession,
+  togglePlayback,
+  seekToFraction,
+  subscribe,
+  isSessionOpen,
+  isPlaying,
+  playbackTime,
+  copyFrequency,
+  FREQUENCY_BINS,
+} from './audioEngine.js';
+import { openMixVisuals, closeMixVisuals } from './mix.js';
 
-gsap.registerPlugin(ScrollTrigger, Observer);
+gsap.registerPlugin(Observer);
 // ... existing scene setup ...
 
 // --- SCENE SETUP ---
@@ -14,140 +27,24 @@ scene.background = new THREE.Color('#080808');
 // Orthographic camera is often better for 2D plane shader effects
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.position.z = 2; // Close to the plane
+const cameraRig = { x: 0, y: 0, z: 2 };
 
 const renderer = new THREE.WebGLRenderer({
   canvas: canvas,
   antialias: true,
   alpha: false
 });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-// --- AUDIO SETUP (native Audio for seek support + Web Audio API for analyser) ---
-const audioEl = new Audio('/groovy deep house mix session.mp3');
-audioEl.loop = true;
-audioEl.volume = 0.5;
-
-// Web Audio API for analyser
-let audioCtx, analyserNode, source, analyser;
-let audioCtxStarted = false;
-
-function initAudioContext() {
-  if (audioCtxStarted) return;
-  audioCtxStarted = true;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  source = audioCtx.createMediaElementSource(audioEl);
-
-  // DSP Nodes
-  window.eqLow = audioCtx.createBiquadFilter();
-  window.eqLow.type = 'lowshelf';
-  window.eqLow.frequency.value = 320;
-
-  window.eqMid = audioCtx.createBiquadFilter();
-  window.eqMid.type = 'peaking';
-  window.eqMid.frequency.value = 1000;
-  window.eqMid.Q.value = 0.5;
-
-  window.eqHigh = audioCtx.createBiquadFilter();
-  window.eqHigh.type = 'highshelf';
-  window.eqHigh.frequency.value = 3200;
-
-  window.filterLP = audioCtx.createBiquadFilter();
-  window.filterLP.type = 'lowpass';
-  window.filterLP.frequency.value = 20000;
-
-  window.filterHP = audioCtx.createBiquadFilter();
-  window.filterHP.type = 'highpass';
-  window.filterHP.frequency.value = 20;
-
-  window.distortion = audioCtx.createWaveShaper();
-  function makeDistortionCurve(amount) {
-    const k = amount;
-    const n_samples = 44100;
-    const curve = new Float32Array(n_samples);
-    const deg = Math.PI / 180;
-    for (let i = 0; i < n_samples; ++i) {
-      const x = i * 2 / n_samples - 1;
-      curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
-    }
-    return curve;
-  }
-  window.distortion.curve = makeDistortionCurve(0);
-  window.distortion.oversample = '4x';
-  window.makeDistortionCurve = makeDistortionCurve;
-
-  window.reverb = audioCtx.createConvolver();
-  function createReverb() {
-    const rate = audioCtx.sampleRate;
-    const length = rate * 2.0;
-    const impulse = audioCtx.createBuffer(2, length, rate);
-    const left = impulse.getChannelData(0);
-    const right = impulse.getChannelData(1);
-    for (let i = 0; i < length; i++) {
-      const decay = Math.exp(-i / (rate * 0.5));
-      left[i] = (Math.random() * 2 - 1) * decay;
-      right[i] = (Math.random() * 2 - 1) * decay;
-    }
-    return impulse;
-  }
-  window.reverb.buffer = createReverb();
-
-  window.dryNode = audioCtx.createGain();
-  window.wetNode = audioCtx.createGain();
-  window.wetNode.gain.value = 0;
-  window.dryNode.gain.value = 1;
-
-  window.limiter = audioCtx.createDynamicsCompressor();
-  window.limiter.threshold.value = -3;
-  window.limiter.knee.value = 0;
-  window.limiter.ratio.value = 20;
-  window.limiter.attack.value = 0.005;
-  window.limiter.release.value = 0.05;
-
-  window.limiterBypass = audioCtx.createGain();
-  window.limiterBypass.gain.value = 0; // Off by default as limiter takes over
-
-  window.masterVol = audioCtx.createGain();
-  window.masterVol.gain.value = 0.5;
-
-  analyserNode = audioCtx.createAnalyser();
-  analyserNode.fftSize = 1024;
-
-  // Chain: Source -> EQ -> Filters -> Distortion -> Split(Dry/Wet Reverb) -> MasterVol -> Split(Limiter/Bypass) -> Analyser -> Dest
-  source.connect(window.eqLow);
-  window.eqLow.connect(window.eqMid);
-  window.eqMid.connect(window.eqHigh);
-  window.eqHigh.connect(window.filterHP);
-  window.filterHP.connect(window.filterLP);
-  window.filterLP.connect(window.distortion);
-
-  window.distortion.connect(window.dryNode);
-  window.distortion.connect(window.wetNode);
-  window.wetNode.connect(window.reverb);
-
-  window.dryNode.connect(window.masterVol);
-  window.reverb.connect(window.masterVol);
-
-  window.masterVol.connect(window.limiter);
-  window.masterVol.connect(window.limiterBypass);
-
-  window.limiter.connect(analyserNode);
-  window.limiterBypass.connect(analyserNode);
-
-  analyserNode.connect(audioCtx.destination);
-
-  // Fake analyser-compatible object to feed into shader
-  analyser = {
-    getAverageFrequency: () => {
-      const data = new Uint8Array(analyserNode.frequencyBinCount);
-      analyserNode.getByteFrequencyData(data);
-      return data.reduce((a, b) => a + b, 0) / data.length;
-    }
-  };
+function applyRendererScale() {
+  const full = Math.min(window.devicePixelRatio || 1, 2);
+  const ratio = document.body.classList.contains('studio-open') ? 1 : full;
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// UI Elements
+applyRendererScale();
+
+// --- AUDIO (shared with Mix Studio) ---
 const audioToggle = document.getElementById('audio-toggle');
 const audioStatusBox = document.getElementById('audio-status');
 const audioIndicator = document.querySelector('.indicator');
@@ -160,72 +57,48 @@ const seekBarFill = document.getElementById('seek-bar-fill');
 const seekBarTrack = document.getElementById('seek-bar-track');
 const seekCurrent = document.getElementById('seek-current');
 const seekTotal = document.getElementById('seek-total');
-const seekTime = document.querySelector('.seek-time');
 
-let soundEnabled = false;
-
-function formatTime(s) {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}`;
+function formatTime(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.floor(seconds % 60);
+  return `${minutes}:${remainder.toString().padStart(2, '0')}`;
 }
 
-function updatePlayPauseIcon() {
-  if (audioEl.paused) {
-    playIcon.style.display = 'block';
-    pauseIcon.style.display = 'none';
-  } else {
-    playIcon.style.display = 'none';
-    pauseIcon.style.display = 'block';
-  }
+function renderTransport() {
+  const open = isSessionOpen();
+  const playing = isPlaying();
+  audioStatusBox.textContent = open ? 'ON' : 'OFF';
+  audioIndicator.classList.toggle('active', open);
+  audioPanel.classList.toggle('visible', open);
+  seekBarContainer.classList.toggle('visible', open);
+  playIcon.style.display = playing ? 'none' : 'block';
+  pauseIcon.style.display = playing ? 'block' : 'none';
 }
 
-// Sound ON/OFF toggle
+function renderSeek() {
+  const { current, duration } = playbackTime();
+  if (!duration) return;
+  seekBarFill.style.width = `${(current / duration) * 100}%`;
+  seekCurrent.textContent = formatTime(current);
+  seekTotal.textContent = formatTime(duration);
+}
+
+subscribe((type) => {
+  if (type === 'transport') renderTransport();
+  if (type === 'time') renderSeek();
+});
+
 audioToggle.addEventListener('click', () => {
-  soundEnabled = !soundEnabled;
-  initAudioContext();
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-
-  if (soundEnabled) {
-    audioEl.play();
-    audioStatusBox.innerText = 'ON';
-    audioIndicator.classList.add('active');
-    audioPanel.classList.add('visible');
-    seekBarContainer.classList.add('visible');
-  } else {
-    audioEl.pause();
-    audioStatusBox.innerText = 'OFF';
-    audioIndicator.classList.remove('active');
-    audioPanel.classList.remove('visible');
-    seekBarContainer.classList.remove('visible');
-  }
-  updatePlayPauseIcon();
+  toggleSession();
 });
 
-// Play / Pause button
 playPauseBtn.addEventListener('click', () => {
-  if (audioEl.paused) {
-    audioEl.play();
-  } else {
-    audioEl.pause();
-  }
-  updatePlayPauseIcon();
+  togglePlayback();
 });
 
-// Seekbar progress update
-audioEl.addEventListener('timeupdate', () => {
-  if (!audioEl.duration) return;
-  const pct = (audioEl.currentTime / audioEl.duration) * 100;
-  seekBarFill.style.width = pct + '%';
-  seekCurrent.textContent = formatTime(audioEl.currentTime);
-  seekTotal.textContent = formatTime(audioEl.duration);
-});
-
-// Click to seek
-seekBarTrack.addEventListener('click', (e) => {
+seekBarTrack.addEventListener('click', (event) => {
   const rect = seekBarTrack.getBoundingClientRect();
-  const fraction = (e.clientX - rect.left) / rect.width;
-  audioEl.currentTime = fraction * audioEl.duration;
+  seekToFraction((event.clientX - rect.left) / rect.width);
 });
 
 
@@ -239,6 +112,7 @@ const geometry = new THREE.PlaneGeometry(10, 6, 300, 120);
 // 8 frequency band uniforms (bass → treble)
 const material = new THREE.ShaderMaterial({
   wireframe: false,
+  side: THREE.DoubleSide,
   uniforms: {
     uTime: { value: 0 },
     uBand0: { value: 0 }, // Sub-bass
@@ -253,7 +127,9 @@ const material = new THREE.ShaderMaterial({
     uColorPeak: { value: new THREE.Color('#ededed') },
     uScrollOffset: { value: 0 },
     uMouse: { value: new THREE.Vector2(0.5, 0.5) },
-    uMouseSpeed: { value: 0.0 }
+    uMouseSpeed: { value: 0.0 },
+    uBend: { value: 0 },
+    uSpin: { value: 0 }
   },
   vertexShader: `
     uniform float uTime;
@@ -262,9 +138,14 @@ const material = new THREE.ShaderMaterial({
     uniform float uScrollOffset;
     uniform vec2 uMouse;
     uniform float uMouseSpeed;
+    uniform float uBend;
+    uniform float uSpin;
 
     varying float vElevation;
     varying float vBandEnergy;
+    varying vec3 vWorldPos;
+    varying vec3 vTubeNormal;
+    varying float vSeam;
 
     // Simplex Noise 2D
     vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -344,32 +225,85 @@ const material = new THREE.ShaderMaterial({
       // The ripple pulls the vertex up aggressively based on cursor speed
       float mouseEffect = mouseRipple * uMouseSpeed * 1.5;
 
-      float elevation = ambientWave + eqSpike + ripple + scrollWave + mouseEffect;
+      float fine = snoise(vec2(pos.x * 2.6 + uTime * 0.04, pos.y * 3.1 - uTime * 0.03)) * 0.018;
+      float elevation = ambientWave + eqSpike + ripple + scrollWave + mouseEffect + fine;
+      float seam = smoothstep(0.88, 0.97, abs(nx));
+      float closedEdge = snoise(vec2(2.5 + uTime * 0.15, pos.y * 0.5 + uTime * 0.1)) * 0.12
+        + snoise(vec2(2.0, pos.y + uScrollOffset)) * 0.08;
+      float roundElevation = mix(elevation, closedEdge, seam);
 
-      pos.z += elevation;
-      pos.x *= 1.4;
+      vec3 flatPos = vec3(position.x * 1.4, position.y, elevation);
+      vec3 flatWorld = (modelMatrix * vec4(flatPos, 1.0)).xyz;
+      vec3 worldPos = flatWorld;
+      vec3 tubeNormal = vec3(0.0, 0.0, 1.0);
+      float t = clamp(uBend, 0.0, 1.0);
 
-      vElevation = elevation;
-      vBandEnergy = bandNorm;
-      
-      gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(pos, 1.0);
+      if (t > 0.0008) {
+        vec3 spine = (modelMatrix * vec4(0.0, position.y, elevation, 1.0)).xyz;
+        vec2 lateral = flatWorld.xy - spine.xy;
+        float endR = 2.85 - roundElevation * 0.85;
+        float openR = 7.0 / max(t * 3.14159265, 1e-3);
+        float radius = mix(openR, endR, t);
+        float span = mix(1.0, 1.008, t);
+        float wrapped = nx * 3.14159265 * span + uSpin;
+        float th = mix(lateral.x / max(radius, 0.001), wrapped, t);
+        vec2 spineXY = mix(spine.xy, cameraPosition.xy + vec2(0.0, -endR), t);
+        float along = (position.y + 3.0) / 6.0;
+        float endZ = cameraPosition.z - mix(0.7, 8.0, along);
+        worldPos.xy = spineXY + vec2(
+          sin(th) * radius,
+          lateral.y * (1.0 - t) + (1.0 - cos(th)) * radius
+        );
+        worldPos.z = mix(flatWorld.z, endZ, t);
+        tubeNormal = vec3(-sin(th), cos(th), 0.0);
+      }
+
+      vElevation = mix(elevation, roundElevation, t) * mix(1.0, 1.35, t);
+      vBandEnergy = mix(bandNorm, 0.0, seam * t);
+      vWorldPos = worldPos;
+      vTubeNormal = tubeNormal;
+      vSeam = seam;
+
+      gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
     }
   `,
   fragmentShader: `
     uniform vec3 uColorBase;
     uniform vec3 uColorPeak;
+    uniform float uBend;
     
     varying float vElevation;
     varying float vBandEnergy;
-    varying vec2 vUv; // Receive UV from vertex shader
+    varying vec3 vWorldPos;
+    varying vec3 vTubeNormal;
+    varying float vSeam;
 
     void main() {
-      // Base-to-highlight blend on elevation
-      float t = smoothstep(-0.05, 0.7, vElevation);
-      vec3 color = mix(uColorBase, uColorPeak, t);
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+      vec3 geom = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+      if (dot(geom, viewDir) < 0.0) geom = -geom;
 
-      // Extra brightness flash on peaks
-      color += uColorPeak * vBandEnergy * 0.12;
+      vec3 radial = normalize(vTubeNormal);
+      if (dot(radial, viewDir) < 0.0) radial = -radial;
+
+      float curl = smoothstep(0.35, 0.9, uBend);
+      vec3 normal = normalize(mix(geom, radial, curl));
+      vec3 lightDir = normalize(vec3(-0.35, 0.82, 0.42));
+      float key = dot(normal, lightDir);
+      float side = smoothstep(-0.2, 0.9, key);
+      float around = clamp(key * 0.32 + 0.64, 0.0, 1.0);
+      float form = mix(side, around, curl);
+      float crest = smoothstep(-0.02, 0.55, vElevation);
+      float ink = crest * mix(0.28, 1.0, form);
+      float spec = pow(max(dot(normal, normalize(lightDir + viewDir)), 0.0), 48.0);
+      spec *= 1.0 - vSeam * curl;
+
+      vec3 color = mix(uColorBase, uColorPeak, clamp(ink, 0.0, 1.0));
+      color += uColorPeak * spec * crest * mix(0.18, 0.08, curl);
+      color += uColorPeak * vBandEnergy * 0.1;
+
+      float fog = smoothstep(5.5, 13.0, length(cameraPosition - vWorldPos));
+      color = mix(color, uColorBase, fog * mix(0.65, 0.35, curl));
 
       gl_FragColor = vec4(color, 1.0);
     }
@@ -427,7 +361,8 @@ function setupScrollAnimations() {
       tl.fromTo('#about .profile-bg-large',
         { opacity: 0, x: dir * 100, scale: 0.95 },
         { opacity: 0.7, x: 0, scale: 1, duration: 1.2, ease: "power3.out" }, 0);
-      tl.fromTo('#about .section-title', { opacity: 0, y: dir * 50 }, { opacity: 1, y: 0, duration: 1, ease: "power3.out" }, 0.2);
+      tl.fromTo('#about .about-label', { opacity: 0, y: dir * 30 }, { opacity: 1, y: 0, duration: 0.8, ease: "power3.out" }, 0.1);
+      tl.fromTo('#about .editorial-headline', { opacity: 0, y: dir * 50 }, { opacity: 1, y: 0, duration: 1, ease: "power3.out" }, 0.2);
       const keywords = document.querySelectorAll('.matrix-text .keyword.word');
       const words = document.querySelectorAll('.matrix-text .word:not(.keyword)');
       if (keywords.length) {
@@ -446,18 +381,10 @@ function setupScrollAnimations() {
       tl.fromTo('#experience .list-item',
         { opacity: 0, x: dir * 100, skewX: dir * -10 },
         { opacity: 1, x: 0, skewX: 0, duration: 1, stagger: 0.15, ease: "power3.out" }, 0.2);
+      tl.set('#experience .list-item', { clearProps: 'transform' });
       return tl;
     },
-    // 3: Skills
-    (dir) => {
-      const tl = gsap.timeline();
-      tl.fromTo('#skills .section-title', { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: 1, ease: "back.out(1.7)" });
-      tl.fromTo('#skills .stack-item',
-        { opacity: 0, scale: 0.3, y: dir * 50, rotation: dir * 10 },
-        { opacity: 1, scale: 1, y: 0, rotation: 0, duration: 0.8, stagger: { amount: 0.6, grid: 'auto', from: 'center' }, ease: "back.out(1.8)" }, 0.2);
-      return tl;
-    },
-    // 4: Contact
+    // 3: Contact
     (dir) => {
       const tl = gsap.timeline();
       tl.fromTo('#contact .huge-text',
@@ -484,7 +411,8 @@ function setupScrollAnimations() {
     (dir) => {
       const tl = gsap.timeline();
       tl.to('#about .profile-bg-large', { opacity: 0, x: dir * -100, scale: 0.95, duration: 0.8, ease: "power3.in" }, 0);
-      tl.to('#about .section-title', { opacity: 0, y: dir * -50, duration: 0.6, ease: "power3.in" }, 0);
+      tl.to('#about .editorial-headline', { opacity: 0, y: dir * -40, duration: 0.5, ease: "power3.in" }, 0);
+      tl.to('#about .about-label', { opacity: 0, y: dir * -20, duration: 0.4, ease: "power3.in" }, 0);
       const keywords = document.querySelectorAll('.matrix-text .keyword.word');
       const words = document.querySelectorAll('.matrix-text .word:not(.keyword)');
       if (words.length) tl.to(words, { opacity: 0, y: dir * -10, duration: 0.4, stagger: 0.01, ease: "none" }, 0);
@@ -498,14 +426,7 @@ function setupScrollAnimations() {
         .to('#experience .about-label', { opacity: 0, x: dir * -50, duration: 0.6, ease: "power3.in" }, 0.2);
       return tl;
     },
-    // 3: Skills
-    (dir) => {
-      const tl = gsap.timeline();
-      tl.to('#skills .stack-item', { opacity: 0, scale: 0.3, y: dir * -50, duration: 0.6, stagger: { amount: 0.3, grid: 'auto', from: 'center' }, ease: "back.in(1.5)" })
-        .to('#skills .section-title', { opacity: 0, scale: 0.8, duration: 0.6, ease: "power3.in" }, 0.2);
-      return tl;
-    },
-    // 4: Contact
+    // 3: Contact
     (dir) => {
       const tl = gsap.timeline();
       tl.to('#contact .huge-text', { opacity: 0, y: dir * -80, filter: "blur(20px)", duration: 0.8, stagger: 0.1, ease: "power3.in" })
@@ -519,16 +440,17 @@ function setupScrollAnimations() {
     { offset: 0.0, camY: 0, camZ: 2, rotZ: 0 },
     { offset: 1.2, camY: -0.2, camZ: 2.2, rotZ: -Math.PI * 0.05 },
     { offset: 2.4, camY: -0.4, camZ: 2.4, rotZ: -Math.PI * 0.1 },
-    { offset: 3.6, camY: -0.5, camZ: 2.5, rotZ: -Math.PI * 0.15 },
     { offset: 5.0, camY: 0, camZ: 2, rotZ: 0 }
   ];
 
   function gotoSection(index, direction) {
-    if (index < 0 || index >= sections.length || isAnimating) return;
+    if (index === currentIndex || index < 0 || index >= sections.length || isAnimating) return;
     isAnimating = true;
+    markSection(index);
 
     const currentSection = sections[currentIndex];
     const nextSection = sections[index];
+    nextSection.scrollTop = direction > 0 ? 0 : nextSection.scrollHeight;
 
     // Hide next section immediately to prevent premature flash
     gsap.set(nextSection, { autoAlpha: 0, zIndex: 30 });
@@ -560,7 +482,7 @@ function setupScrollAnimations() {
     // 2. 3D background shift
     const next3D = webglStates[index] || webglStates[0];
     tl.to(material.uniforms.uScrollOffset, { value: next3D.offset, duration: 1.2, ease: "power2.inOut" }, 0.2);
-    tl.to(camera.position, { y: next3D.camY, z: next3D.camZ, duration: 1.2, ease: "power2.inOut" }, 0.2);
+    tl.to(cameraRig, { y: next3D.camY, z: next3D.camZ, duration: 1.2, ease: "power2.inOut" }, 0.2);
     tl.to(plane.rotation, { z: next3D.rotZ, duration: 1.2, ease: "power2.inOut" }, 0.2);
 
     // 3. Show next container precisely at 0.8s
@@ -572,25 +494,80 @@ function setupScrollAnimations() {
     }
   }
 
-  // Play hero entry immediately
+  const sectionButtons = document.querySelectorAll('.section-nav button');
+
+  function markSection(index) {
+    sectionButtons.forEach((button, buttonIndex) => {
+      if (buttonIndex === index) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    });
+  }
+
+  function moveSection(direction) {
+    if (sectionScrollLocked || isAnimating) return;
+    if (panelCanConsume(direction)) return;
+    gotoSection(currentIndex + direction, direction);
+  }
+
+  const phoneQuery = window.matchMedia('(max-width: 768px)');
+
+  function panelCanConsume(direction) {
+    if (!phoneQuery.matches) return false;
+    const panel = document.querySelector('.panel.active');
+    if (!panel) return false;
+    const max = panel.scrollHeight - panel.clientHeight;
+    if (max <= 1) return false;
+    if (direction > 0) return panel.scrollTop < max - 1;
+    return panel.scrollTop > 1;
+  }
+
+  window.addEventListener('wheel', (event) => {
+    if (sectionScrollLocked) return;
+    const direction = event.deltaY > 0 ? 1 : -1;
+    if (panelCanConsume(direction)) return;
+    event.preventDefault();
+  }, { passive: false });
+
   entryAnimations[0](1);
 
-  // Create event watcher
   Observer.create({
     type: "wheel,touch,pointer",
     wheelSpeed: -1,
-    onDown: () => {
-      // scroll up / previous
-      if (!isAnimating) gotoSection(currentIndex - 1, -1);
-    },
-    onUp: () => {
-      // scroll down / next
-      if (!isAnimating) gotoSection(currentIndex + 1, 1);
-    },
-    tolerance: 50, // Requires a solid swipe/scroll to trigger
-    preventDefault: true
+    onDown: () => moveSection(-1),
+    onUp: () => moveSection(1),
+    tolerance: 50,
+    preventDefault: false
+  });
+
+  sectionButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const index = Number(button.dataset.index);
+      gotoSection(index, index > currentIndex ? 1 : -1);
+    });
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (sectionScrollLocked) return;
+    if (event.target.closest('input, textarea, select')) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+    if (event.key === 'ArrowDown' || event.key === 'PageDown') {
+      event.preventDefault();
+      moveSection(1);
+    } else if (event.key === 'ArrowUp' || event.key === 'PageUp') {
+      event.preventDefault();
+      moveSection(-1);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      gotoSection(0, -1);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      gotoSection(sections.length - 1, 1);
+    }
   });
 }
+
+let sectionScrollLocked = false;
 
 // Ensure GSAP runs properly on init
 setTimeout(() => {
@@ -601,16 +578,14 @@ setTimeout(() => {
 // --- ANIMATION BLENDING & RENDER LOOP ---
 const clock = new THREE.Clock();
 
-// Mouse interaction tracking for tiny reactive displacement
-let mouseX = 0;
-let mouseY = 0;
-let targetX = 0;
-let targetY = 0;
-const windowHalfX = window.innerWidth / 2;
-const windowHalfY = window.innerHeight / 2;
+// Mouse parallax is an offset on the scroll rig, so section tweens keep the camera.
+let mouseOffsetX = 0;
+let mouseOffsetY = 0;
+let windowHalfX = window.innerWidth / 2;
+let windowHalfY = window.innerHeight / 2;
+const parallax = { x: 0, y: 0 };
 
-// Pre-allocate FFT buffer — resized once analyserNode is ready
-let fftData = new Uint8Array(512);
+const frequencyBins = new Uint8Array(FREQUENCY_BINS);
 const bands = new Float32Array(8);
 
 // --- MOUSE TRACKING & RAYCASTING ---
@@ -623,6 +598,8 @@ window.addEventListener('mousemove', (event) => {
   // Normalize screen coordinates
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  mouseOffsetX = event.clientX - windowHalfX;
+  mouseOffsetY = event.clientY - windowHalfY;
 
   // Calculate mouse speed for intensity
   const tempMouse = new THREE.Vector2(event.clientX, event.clientY);
@@ -644,6 +621,149 @@ window.addEventListener('mousemove', (event) => {
 // --- ANIMATION LOOP ---
 let previousTime = 0;
 
+const experienceCopy = [...document.querySelectorAll('#experience .description')];
+const copyShade = new WeakMap();
+
+function shadeForBackground(signal, currentlyLight) {
+  const preferLight = currentlyLight ? signal < 0.38 : signal < 0.26;
+  if (preferLight) return Math.min(1, Math.max(0.78, 1 - signal * 1.1));
+  const lift = Math.min(1, Math.max(0, (signal - 0.26) / 0.6));
+  return 0.18 - lift * 0.13;
+}
+
+let shadeRow = new Uint8Array(2048 * 4);
+let shadeLayout = null;
+let shadeTick = 0;
+
+function descriptionWords(el) {
+  if (el._words && el._lineWidth === el.clientWidth) return el._words;
+  const words = el.textContent.trim().split(/\s+/);
+  const spans = words.map((word, index) => {
+    const span = document.createElement('span');
+    span.textContent = index === words.length - 1 ? word : `${word} `;
+    return span;
+  });
+  el.replaceChildren(...spans);
+  el._lineWidth = el.clientWidth;
+  el._words = spans;
+  return spans;
+}
+
+function bufferX(cssX, canvasBox, bufferWidth) {
+  return Math.min(bufferWidth - 1, Math.max(0, Math.floor(((cssX - canvasBox.left) / canvasBox.width) * bufferWidth)));
+}
+
+function shadeLine(spans, canvasBox, bufferWidth, bufferHeight) {
+  const first = spans[0].getBoundingClientRect();
+  const last = spans[spans.length - 1].getBoundingClientRect();
+  const midY = (first.top + first.bottom) / 2;
+  const x0 = bufferX(first.left, canvasBox, bufferWidth);
+  const x1 = bufferX(last.right, canvasBox, bufferWidth);
+  const width = Math.max(1, x1 - x0);
+  const y = Math.min(bufferHeight - 1, Math.max(0, Math.floor((1 - (midY - canvasBox.top) / canvasBox.height) * bufferHeight)));
+  const words = spans.map((span) => {
+    const rect = span.getBoundingClientRect();
+    const start = Math.max(0, bufferX(rect.left, canvasBox, bufferWidth) - x0);
+    const end = Math.max(start + 1, Math.min(width, bufferX(rect.right, canvasBox, bufferWidth) - x0));
+    return { span, start, end, level: 1 };
+  });
+  return { x0, y, width, words };
+}
+
+function collectShadeLines(canvasBox, bufferWidth, bufferHeight) {
+  const lines = [];
+  experienceCopy.forEach((el) => {
+    const words = descriptionWords(el);
+    let group = [];
+    let lineTop = null;
+    const pushGroup = () => {
+      if (group.length) lines.push(shadeLine(group, canvasBox, bufferWidth, bufferHeight));
+    };
+    words.forEach((span) => {
+      const top = span.offsetTop;
+      if (lineTop !== null && top !== lineTop) pushGroup();
+      if (lineTop !== top) {
+        group = [];
+        lineTop = top;
+      }
+      group.push(span);
+    });
+    pushGroup();
+  });
+  return lines;
+}
+
+function shadeMeasureKey() {
+  let key = 0;
+  experienceCopy.forEach((el) => {
+    const last = el.lastElementChild;
+    key = (key * 33 + el.clientWidth + (last ? last.offsetTop : 0)) | 0;
+  });
+  return key;
+}
+
+function sampleShadeLine(gl, line) {
+  if (shadeRow.length < line.width * 4) shadeRow = new Uint8Array(line.width * 4);
+  gl.readPixels(line.x0, line.y, line.width, 1, gl.RGBA, gl.UNSIGNED_BYTE, shadeRow);
+  line.words.forEach((word) => {
+    const step = Math.max(1, Math.floor((word.end - word.start) / 3));
+    let signal = 0;
+    let count = 0;
+    for (let pixel = word.start; pixel < word.end; pixel += step) {
+      const offset = pixel * 4;
+      signal += (shadeRow[offset] + shadeRow[offset + 1] + shadeRow[offset + 2]) / 765;
+      count += 1;
+    }
+    const current = copyShade.get(word.span) ?? 1;
+    word.level = shadeForBackground(signal / count, current >= 0.5);
+  });
+}
+
+function paintShadeWord(word) {
+  const span = word.span;
+  const current = copyShade.get(span) ?? 1;
+  const next = current + (word.level - current) * 0.2;
+  copyShade.set(span, next);
+  const color = Math.round(next * 255);
+  if (span._shadeValue === color) return;
+  span._shadeValue = color;
+  span.style.color = `rgb(${color}, ${color}, ${color})`;
+}
+
+function storeShadeLayout(bufferWidth, bufferHeight, key) {
+  const canvasBox = canvas.getBoundingClientRect();
+  if (canvasBox.width < 2 || canvasBox.height < 2) return false;
+  shadeLayout = {
+    bufferWidth,
+    bufferHeight,
+    key,
+    lines: collectShadeLines(canvasBox, bufferWidth, bufferHeight)
+  };
+  return true;
+}
+
+function shadeExperienceCopy() {
+  const section = document.getElementById('experience');
+  if (!section.classList.contains('active')) return;
+
+  const gl = renderer.getContext();
+  const bufferWidth = gl.drawingBufferWidth;
+  const bufferHeight = gl.drawingBufferHeight;
+  shadeTick += 1;
+  const bufferChanged = !shadeLayout
+    || shadeLayout.bufferWidth !== bufferWidth
+    || shadeLayout.bufferHeight !== bufferHeight;
+  const sampleFrame = bufferChanged || shadeTick % 3 === 0;
+  const key = sampleFrame ? shadeMeasureKey() : shadeLayout.key;
+  const stale = bufferChanged || shadeLayout.key !== key;
+  if (stale && !storeShadeLayout(bufferWidth, bufferHeight, key)) return;
+  if (stale || sampleFrame) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    shadeLayout.lines.forEach((line) => sampleShadeLine(gl, line));
+  }
+  shadeLayout.lines.forEach((line) => line.words.forEach(paintShadeWord));
+}
+
 const animate = () => {
   requestAnimationFrame(animate);
   const elapsedTime = clock.getElapsedTime();
@@ -654,31 +774,33 @@ const animate = () => {
   targetMouseSpeed *= 0.95;
   material.uniforms.uMouseSpeed.value += (targetMouseSpeed - material.uniforms.uMouseSpeed.value) * 0.1;
 
-  // Mouse Parallax effect
-  targetX = mouseX * 0.0005;
-  targetY = mouseY * 0.0005;
-
-  // Smoothly move camera
-  camera.position.x += (targetX - camera.position.x) * 0.05;
-  camera.position.y += (-targetY - camera.position.y) * 0.05;
+  // Mouse parallax rides on top of the section camera rig
+  parallax.x += (mouseOffsetX * 0.0005 - parallax.x) * 0.05;
+  parallax.y += (mouseOffsetY * 0.0005 - parallax.y) * 0.05;
+  camera.position.x = cameraRig.x + parallax.x;
+  camera.position.y = cameraRig.y - parallax.y;
+  camera.position.z = cameraRig.z;
 
   // Update Shader Uniforms
   material.uniforms.uTime.value = elapsedTime;
+  const bend = material.uniforms.uBend.value;
+  if (bend > 0.98 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    material.uniforms.uSpin.value = (material.uniforms.uSpin.value + deltaTime * 0.31) % (Math.PI * 2);
+  } else if (bend < 0.02) {
+    material.uniforms.uSpin.value = 0;
+  }
 
   // Handle Audio Reactivity — 8 frequency bands
-  if (analyserNode && !audioEl.paused) {
-    analyserNode.getByteFrequencyData(fftData);
-    const bandSize = Math.floor(fftData.length / 8);
+  if (isPlaying() && copyFrequency(frequencyBins)) {
+    const bandSize = Math.floor(frequencyBins.length / 8);
 
-    // Average each chunk of bins into one band value
     for (let b = 0; b < 8; b++) {
       const start = b * bandSize;
       let sum = 0;
-      for (let j = start; j < start + bandSize; j++) sum += fftData[j];
+      for (let j = start; j < start + bandSize; j++) sum += frequencyBins[j];
       bands[b] = sum / bandSize;
     }
 
-    // Smooth-lerp into uniforms — lower = smoother/slower reaction
     const lerp = 0.09;
     material.uniforms.uBand0.value += (bands[0] - material.uniforms.uBand0.value) * lerp;
     material.uniforms.uBand1.value += (bands[1] - material.uniforms.uBand1.value) * lerp;
@@ -689,7 +811,6 @@ const animate = () => {
     material.uniforms.uBand6.value += (bands[6] - material.uniforms.uBand6.value) * lerp;
     material.uniforms.uBand7.value += (bands[7] - material.uniforms.uBand7.value) * lerp;
   } else {
-    // Decay bands back to zero if audio is off
     const decay = 0.04;
     ['uBand0', 'uBand1', 'uBand2', 'uBand3', 'uBand4', 'uBand5', 'uBand6', 'uBand7'].forEach(u => {
       material.uniforms[u].value += (0 - material.uniforms[u].value) * decay;
@@ -697,16 +818,138 @@ const animate = () => {
   }
 
   renderer.render(scene, camera);
+  if (!document.body.classList.contains('studio-open')) shadeExperienceCopy();
+  drawContactSpectrum();
+}
+
+const contactWord = document.getElementById('contact-getin');
+const contactLabel = document.getElementById('contact-getin-label');
+const contactSpectrum = document.getElementById('contact-spectrum');
+const contactSpectrumCtx = contactSpectrum.getContext('2d');
+const contactBins = new Uint8Array(FREQUENCY_BINS);
+
+function contactBox() {
+  const host = contactWord.getBoundingClientRect();
+  const ink = contactLabel.getBoundingClientRect();
+  return {
+    text: contactLabel.textContent.toUpperCase(),
+    left: ink.left - host.left,
+    top: ink.top - host.top,
+    width: ink.width,
+    height: ink.height
+  };
+}
+
+function fitContactSpectrum(width, height) {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.floor(width * ratio);
+  const pixelHeight = Math.floor(height * ratio);
+  if (contactSpectrum.width === pixelWidth && contactSpectrum.height === pixelHeight) return;
+  contactSpectrum.width = pixelWidth;
+  contactSpectrum.height = pixelHeight;
+}
+
+function useContactFont(ctx) {
+  const style = getComputedStyle(contactLabel);
+  ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = style.letterSpacing;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function contactInkBand(ctx, text, height) {
+  const metrics = ctx.measureText(text);
+  const baseline = (height + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
+  return {
+    baseline,
+    top: baseline - metrics.actualBoundingBoxAscent,
+    bottom: baseline + metrics.actualBoundingBoxDescent
+  };
+}
+
+let contactPeak = 0.12;
+let contactLevels = new Float32Array(0);
+
+function contactBandPeak(index, count) {
+  const last = contactBins.length - 1;
+  const position = count <= 1 ? 0 : index / (count - 1);
+  const center = Math.round(2 * Math.pow(last / 2, position));
+  const reach = Math.max(1, Math.round(center * 0.06));
+  const from = Math.max(0, center - reach);
+  const to = Math.min(last, center + reach);
+  let peak = 0;
+  for (let bin = from; bin <= to; bin += 1) {
+    if (contactBins[bin] > peak) peak = contactBins[bin];
+  }
+  return peak / 255;
+}
+
+function readContactLevels(count) {
+  if (contactLevels.length !== count) contactLevels = new Float32Array(count);
+  let framePeak = 0.12;
+  for (let i = 0; i < count; i += 1) {
+    const level = contactBandPeak(i, count);
+    contactLevels[i] = level;
+    if (level > framePeak) framePeak = level;
+  }
+  contactPeak = Math.max(framePeak, contactPeak * 0.86);
+}
+
+function paintContactBars(ctx, width, inkTop, inkBottom) {
+  const span = Math.max(1, inkBottom - inkTop);
+  const barWidth = 3;
+  const gap = 2;
+  const barCount = Math.max(1, Math.floor(width / (barWidth + gap)));
+  const floor = span * 0.08;
+  const travel = span - floor;
+  readContactLevels(barCount);
+  for (let i = 0; i < barCount; i += 1) {
+    const shaped = Math.pow(contactLevels[i] / contactPeak, 0.55);
+    const barHeight = floor + shaped * travel;
+    const x = i * (barWidth + gap);
+    const y = inkBottom - barHeight;
+    ctx.fillStyle = `hsla(${(i / barCount) * 60 + 300}, 100%, 60%, 0.95)`;
+    ctx.fillRect(x, y, barWidth, barHeight);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x, Math.max(inkTop, y - 2), barWidth, 1);
+  }
+}
+
+function fillContactWord(ctx, box, baseline) {
+  ctx.fillStyle = '#ededed';
+  ctx.fillText(box.text, 0, baseline);
+}
+
+function drawContactSpectrum() {
+  if (!document.getElementById('contact').classList.contains('active')) return;
+  const box = contactBox();
+  if (box.width < 2 || box.height < 2) return;
+  if (!(isPlaying() && copyFrequency(contactBins))) contactBins.fill(0);
+  contactSpectrum.style.left = `${box.left}px`;
+  contactSpectrum.style.top = `${box.top}px`;
+  contactSpectrum.style.width = `${box.width}px`;
+  contactSpectrum.style.height = `${box.height}px`;
+  fitContactSpectrum(box.width, box.height);
+  const ctx = contactSpectrumCtx;
+  ctx.setTransform(contactSpectrum.width / box.width, 0, 0, contactSpectrum.height / box.height, 0, 0);
+  ctx.clearRect(0, 0, box.width, box.height);
+  useContactFont(ctx);
+  const band = contactInkBand(ctx, box.text, box.height);
+  fillContactWord(ctx, box, band.baseline);
+  ctx.globalCompositeOperation = 'source-atop';
+  paintContactBars(ctx, box.width, band.top, band.bottom);
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 animate();
 
 // --- RESIZE HANDLER ---
 window.addEventListener('resize', () => {
+  windowHalfX = window.innerWidth / 2;
+  windowHalfY = window.innerHeight / 2;
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  applyRendererScale();
 });
 
 // --- DONUM THEME TOGGLE ---
@@ -743,3 +986,261 @@ donumBtn.addEventListener('click', () => {
     duration: 0.8, ease: 'power2.inOut'
   });
 });
+
+const mixStudioToggle = document.getElementById('mix-studio-toggle');
+const mixClose = document.getElementById('mix-close');
+const mixView = document.getElementById('mix-view');
+let studioTimeline = null;
+let splitClone = null;
+
+function clearSplit() {
+  const panel = document.querySelector('.panel.active');
+  const content = panel && panel.querySelector('.content');
+  const scrollMark = panel && panel.querySelector('.scroll-down');
+  const moving = '.section-nav, .header, #experience .about-label, #experience .list-item, #about .about-label, #about .editorial-headline, #about .editorial-body-spacious, #about .profile-bg-large, #home .huge-text, #home .studio-letter, #donum-btn, #home .eyebrow';
+  gsap.killTweensOf([content, splitClone, scrollMark].filter(Boolean));
+  gsap.killTweensOf(moving);
+  if (content) {
+    content.style.clipPath = '';
+    content.style.transform = '';
+  }
+  if (splitClone) {
+    splitClone.remove();
+    splitClone = null;
+  }
+  if (content) gsap.set(content, { clearProps: 'transform,clipPath,opacity,visibility' });
+  if (scrollMark) gsap.set(scrollMark, { clearProps: 'transform,opacity,visibility' });
+  gsap.set(moving, { clearProps: 'transform,opacity,visibility' });
+  document.getElementById('experience').classList.remove('studio-exit');
+  const donum = document.getElementById('donum-btn');
+  if (donum) donum.style.animation = '';
+}
+
+const planeRestTilt = -Math.PI * 0.38;
+const planeRestY = -1.2;
+
+function bendPlane(timeline) {
+  timeline.to(material.uniforms.uBend, { value: 1, duration: 1.5, ease: 'power2.inOut' }, 0);
+}
+
+function flattenPlane() {
+  material.uniforms.uBend.value = 0;
+  plane.rotation.x = planeRestTilt;
+  plane.position.set(0, planeRestY, 0);
+}
+
+function finishStudioClose() {
+  const panel = document.querySelector('.panel.active');
+  if (studioTimeline) {
+    studioTimeline.eventCallback('onReverseComplete', null);
+    studioTimeline.kill();
+    studioTimeline = null;
+  }
+  flattenPlane();
+  document.body.classList.remove('studio-open');
+  mixView.style.display = 'none';
+  gsap.set('.deck-top, .mix-grid, .mix-close', { clearProps: 'transform,opacity,visibility' });
+  clearSplit();
+  mixView.inert = true;
+  if (panel) panel.inert = false;
+  sectionScrollLocked = false;
+  closeMixVisuals();
+  requestAnimationFrame(() => {
+    if (document.body.classList.contains('studio-open')) return;
+    mixView.style.display = '';
+    applyRendererScale();
+  });
+  mixStudioToggle.focus();
+}
+
+function homeLetters(heading) {
+  if (heading.querySelector('.studio-letter')) {
+    return [...heading.querySelectorAll('.studio-letter')];
+  }
+  const chars = [...heading.textContent];
+  heading.textContent = '';
+  return chars.flatMap((char) => {
+    if (char.trim() === '') {
+      heading.appendChild(document.createTextNode(char));
+      return [];
+    }
+    const span = document.createElement('span');
+    span.className = 'studio-letter';
+    span.textContent = char;
+    heading.appendChild(span);
+    return [span];
+  });
+}
+
+function sendHomePair(timeline, atae, donum) {
+  donum.style.animation = 'none';
+  timeline.to(atae, {
+    x: () => -(atae.getBoundingClientRect().right + 72),
+    duration: 0.72,
+    ease: 'power3.inOut'
+  }, 0);
+  timeline.to(donum, {
+    x: () => window.innerWidth - donum.getBoundingClientRect().left + 72,
+    duration: 0.72,
+    ease: 'power3.inOut'
+  }, 0);
+}
+
+function sendHomeLetters(timeline, letters) {
+  const mid = Math.ceil(letters.length / 2);
+  const start = 0.2;
+  const stagger = 0.08;
+  const duration = 0.65;
+  const travel = { stagger, duration, ease: 'power3.inOut' };
+  timeline.to(letters.slice(0, mid), { ...travel, y: () => -window.innerHeight }, start);
+  timeline.to(letters.slice(mid), { ...travel, y: () => window.innerHeight }, start);
+  const steps = Math.max(mid, letters.length - mid);
+  return start + (steps - 1) * stagger + duration;
+}
+
+function showStudio() {
+  if (document.body.classList.contains('studio-open')) return;
+  const panel = document.querySelector('.panel.active');
+  const content = panel.querySelector('.content');
+  const scrollMark = panel.querySelector('.scroll-down');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  gsap.killTweensOf(content);
+  const distance = window.innerWidth * 0.55;
+  const holdMixer = panel.id === 'home';
+  gsap.set('.deck-top', { y: holdMixer ? -window.innerHeight : -window.innerHeight * 0.5 });
+  gsap.set('.mix-grid', { y: holdMixer ? window.innerHeight : window.innerHeight * 0.55 });
+  if (holdMixer) gsap.set('.mix-close', { autoAlpha: 0 });
+
+  document.body.classList.add('studio-open');
+  applyRendererScale();
+  mixView.inert = false;
+  panel.inert = true;
+  sectionScrollLocked = true;
+  openMixVisuals();
+
+  if (reduce) {
+    gsap.set(content, { autoAlpha: 0 });
+    if (scrollMark) gsap.set(scrollMark, { autoAlpha: 0 });
+    gsap.set('.section-nav', { autoAlpha: 0 });
+    gsap.set('.header', { autoAlpha: 0 });
+    gsap.set('.deck-top, .mix-grid', { y: 0 });
+    material.uniforms.uBend.value = 1;
+    mixClose.focus();
+    return;
+  }
+
+  const leavesWhole = panel.id === 'experience' || panel.id === 'contact' || panel.id === 'about' || panel.id === 'home';
+  const clone = leavesWhole ? null : content.cloneNode(true);
+  if (clone) {
+    clone.classList.add('split-right');
+    clone.setAttribute('aria-hidden', 'true');
+    clone.inert = true;
+    clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+    const rect = content.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    panel.appendChild(clone);
+    gsap.set(clone, {
+      position: 'absolute',
+      top: rect.top - panelRect.top,
+      left: rect.left - panelRect.left,
+      width: rect.width,
+      height: rect.height,
+      margin: 0,
+      clipPath: 'inset(0 0 0 calc(50% - 1px))',
+      pointerEvents: 'none'
+    });
+    gsap.set(content, { clipPath: 'inset(0 calc(50% - 1px) 0 0)' });
+    splitClone = clone;
+  }
+
+  studioTimeline = gsap.timeline({ defaults: { duration: 0.9, ease: 'power3.inOut' } });
+  bendPlane(studioTimeline);
+  let deckAt = 0.22;
+  if (panel.id === 'experience') {
+    const label = panel.querySelector('.about-label');
+    const items = panel.querySelectorAll('.list-item');
+    panel.classList.add('studio-exit');
+    if (label) {
+      const labelBottom = label.getBoundingClientRect().bottom;
+      studioTimeline.to(label, { y: -(labelBottom + 40), duration: 1.05, ease: 'power2.inOut' }, 0);
+    }
+    items.forEach((item, index) => {
+      const rect = item.getBoundingClientRect();
+      const toRight = index % 2 === 0;
+      const travel = toRight ? window.innerWidth - rect.left + 48 : rect.right + 48;
+      studioTimeline.to(item, { x: (toRight ? 1 : -1) * travel, duration: 1.05, ease: 'power2.inOut' }, 0);
+    });
+  } else if (panel.id === 'contact') {
+    const pieces = [content, ...content.querySelectorAll('*')];
+    const right = Math.max(...pieces.map((node) => node.getBoundingClientRect().right));
+    studioTimeline.to(content, { x: -(right + 48), duration: 1.05, ease: 'power2.inOut' }, 0);
+  } else if (panel.id === 'about') {
+    const label = panel.querySelector('.about-label');
+    const headline = panel.querySelector('.editorial-headline');
+    const body = panel.querySelector('.editorial-body-spacious');
+    const portrait = panel.querySelector('.profile-bg-large');
+    [label, headline].filter(Boolean).forEach((el) => {
+      const right = Math.max(...[el, ...el.querySelectorAll('*')].map((node) => node.getBoundingClientRect().right));
+      studioTimeline.to(el, { x: -(right + 48), duration: 1.05, ease: 'power2.inOut' }, 0);
+    });
+    if (body) {
+      const top = body.getBoundingClientRect().top;
+      studioTimeline.to(body, { y: window.innerHeight - top + 48, duration: 1.05, ease: 'power2.inOut' }, 0);
+    }
+    if (portrait) studioTimeline.to(portrait, { autoAlpha: 0, duration: 1.05, ease: 'power2.inOut' }, 0);
+  } else if (panel.id === 'home') {
+    const atae = panel.querySelector('.hero-row .huge-text');
+    const donum = document.getElementById('donum-btn');
+    const surname = panel.querySelector('.huge-text.indent');
+    const eyebrow = panel.querySelector('.eyebrow');
+    surname.style.clipPath = 'none';
+    sendHomePair(studioTimeline, atae, donum);
+    deckAt = sendHomeLetters(studioTimeline, homeLetters(surname));
+    if (eyebrow) studioTimeline.to(eyebrow, { autoAlpha: 0, y: -24, duration: 0.4 }, 0);
+    studioTimeline.to('.mix-close', { autoAlpha: 1, duration: 0.35 }, deckAt);
+  } else {
+    studioTimeline.to(content, { x: -distance }, 0);
+    studioTimeline.to(clone, { x: distance }, 0);
+  }
+  if (scrollMark) studioTimeline.to(scrollMark, { x: distance * 0.5, autoAlpha: 0, duration: 0.7 }, 0);
+  const navExit = window.matchMedia('(max-width: 768px)').matches
+    ? { x: 0, y: 90, autoAlpha: 0, duration: 0.55 }
+    : { x: 80, autoAlpha: 0, duration: 0.55 };
+  studioTimeline.to('.section-nav', navExit, 0);
+  studioTimeline.to('.header', { y: -140, duration: 0.7, ease: 'power3.in' }, 0);
+  studioTimeline.to('.deck-top', { y: 0, duration: 1, ease: 'power3.out' }, deckAt);
+  studioTimeline.to('.mix-grid', { y: 0, duration: 1, ease: 'power3.out' }, deckAt);
+  mixClose.focus();
+}
+
+function hideStudio() {
+  if (!document.body.classList.contains('studio-open')) return;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !studioTimeline) {
+    finishStudioClose();
+    return;
+  }
+  if (studioTimeline.reversed()) return;
+  studioTimeline.eventCallback('onReverseComplete', finishStudioClose);
+  studioTimeline.reverse();
+}
+
+mixStudioToggle.addEventListener('click', () => {
+  showStudio();
+  if (location.hash !== '#mix') history.pushState({ studio: true }, '', '#mix');
+});
+
+mixClose.addEventListener('click', () => {
+  hideStudio();
+  if (location.hash === '#mix') {
+    history.pushState({ studio: false }, '', location.pathname + location.search);
+  }
+});
+
+window.addEventListener('popstate', () => {
+  if (location.hash === '#mix') showStudio();
+  else hideStudio();
+});
+
+if (location.hash === '#mix') showStudio();
