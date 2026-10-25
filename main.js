@@ -15,18 +15,14 @@ import {
 import { openMixVisuals, closeMixVisuals } from './mix.js';
 
 gsap.registerPlugin(Observer);
-// ... existing scene setup ...
 
-// --- SCENE SETUP ---
 const canvas = document.querySelector('#webgl');
 const scene = new THREE.Scene();
 
-// Minimalist Background (Charcoal Black)
 scene.background = new THREE.Color('#080808');
 
-// Orthographic camera is often better for 2D plane shader effects
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 2; // Close to the plane
+camera.position.z = 2;
 const cameraRig = { x: 0, y: 0, z: 2 };
 
 const renderer = new THREE.WebGLRenderer({
@@ -44,7 +40,6 @@ function applyRendererScale() {
 
 applyRendererScale();
 
-// --- AUDIO (shared with Mix Studio) ---
 const audioToggle = document.getElementById('audio-toggle');
 const audioStatusBox = document.getElementById('audio-status');
 const audioIndicator = document.querySelector('.indicator');
@@ -101,28 +96,21 @@ seekBarTrack.addEventListener('click', (event) => {
   seekToFraction((event.clientX - rect.left) / rect.width);
 });
 
-
-
-
-// --- SHADERS & FLUID PLANE ---
-
-// Dense segments for smooth EQ deformation
 const geometry = new THREE.PlaneGeometry(10, 6, 300, 120);
 
-// 8 frequency band uniforms (bass → treble)
 const material = new THREE.ShaderMaterial({
   wireframe: false,
   side: THREE.DoubleSide,
   uniforms: {
     uTime: { value: 0 },
-    uBand0: { value: 0 }, // Sub-bass
-    uBand1: { value: 0 }, // Bass
-    uBand2: { value: 0 }, // Low-mid
-    uBand3: { value: 0 }, // Mid
-    uBand4: { value: 0 }, // Upper-mid
-    uBand5: { value: 0 }, // Presence
-    uBand6: { value: 0 }, // Brilliance
-    uBand7: { value: 0 }, // Air
+    uBand0: { value: 0 },
+    uBand1: { value: 0 },
+    uBand2: { value: 0 },
+    uBand3: { value: 0 },
+    uBand4: { value: 0 },
+    uBand5: { value: 0 },
+    uBand6: { value: 0 },
+    uBand7: { value: 0 },
     uColorBase: { value: new THREE.Color('#0a0a0a') },
     uColorPeak: { value: new THREE.Color('#ededed') },
     uScrollOffset: { value: 0 },
@@ -147,7 +135,6 @@ const material = new THREE.ShaderMaterial({
     varying vec3 vTubeNormal;
     varying float vSeam;
 
-    // Simplex Noise 2D
     vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
     vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
     vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
@@ -173,12 +160,11 @@ const material = new THREE.ShaderMaterial({
       return 130.0 * dot(m, g);
     }
 
-    // Smooth interpolation across 8 bands
     float getBandEnergy(float nx) {
-      float t = clamp((nx + 1.0) / 2.0, 0.0, 1.0) * 7.0; // 0..7
+      float t = clamp((nx + 1.0) / 2.0, 0.0, 1.0) * 7.0;
       int i = int(floor(t));
-      float f = fract(t); // 0..1 fractional position within current band
-      // Smooth cubic ease for the blend
+      float f = fract(t);
+
       float s = f * f * (3.0 - 2.0 * f);
 
       float b0 = uBand0, b1 = uBand1, b2 = uBand2, b3 = uBand3;
@@ -196,33 +182,26 @@ const material = new THREE.ShaderMaterial({
     void main() {
       vec3 pos = position;
 
-      // Normalise X to -1..1
       float nx = pos.x / 5.0;
 
-      // Which band drives this column?
       float bandEnergy = getBandEnergy(nx);
-      float bandNorm = bandEnergy / 255.0; // 0..1
+      float bandNorm = bandEnergy / 255.0;
 
-      // EQ spike — smooth noise envelope modulates the spike so columns blend organically
       float eqSpike = bandNorm * 0.9;
-      // Modulate spike amplitude along Y so it rises toward front edge
+
       float yFade = smoothstep(-3.0, 0.5, pos.y);
       eqSpike *= yFade;
 
-      // Soft noise underneath for organic feel — scales with energy too
       float ambientWave = snoise(vec2(pos.x * 0.5 + uTime * 0.15, pos.y * 0.5 + uTime * 0.1)) * 0.12;
 
-      // Ripple: fast noise scaled by energy (gives the "trembling" reaction)
       float ripple = snoise(vec2(pos.x * 2.5 - uTime * 0.8, pos.y * 2.5 + uTime * 0.4)) * bandNorm * 0.35;
 
-      // Scroll wave
       float scrollWave = snoise(vec2(pos.x * 0.4, pos.y + uScrollOffset)) * 0.08;
 
-      // Compute interactive mouse ripple
       float distToMouse = distance(uv, uMouse);
       float mouseRipple = smoothstep(0.3, 0.0, distToMouse);
       
-      // The ripple pulls the vertex up aggressively based on cursor speed
+
       float mouseEffect = mouseRipple * uMouseSpeed * 1.5;
 
       float fine = snoise(vec2(pos.x * 2.6 + uTime * 0.04, pos.y * 3.1 - uTime * 0.03)) * 0.018;
@@ -316,14 +295,11 @@ plane.rotation.z = Math.PI * 0.08;
 plane.position.y = -1.2;
 scene.add(plane);
 
-
-// --- SCROLL ANIMATIONS & TEXT REVEAL ---
 function setupScrollAnimations() {
   const sections = document.querySelectorAll('.panel');
   let currentIndex = 0;
   let isAnimating = false;
 
-  // We must prepare the words for About first so it's ready before animation
   const paragraphs = document.querySelectorAll('.matrix-text');
   paragraphs.forEach(paragraph => {
     if (!paragraph.querySelector('.word')) {
@@ -344,9 +320,8 @@ function setupScrollAnimations() {
     }
   });
 
-  // Prepare custom bespoke entry & exit animations
   const entryAnimations = [
-    // 0: Hero
+
     (dir) => {
       const tl = gsap.timeline();
       tl.fromTo('.hero .eyebrow', { opacity: 0, y: dir * 20 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" })
@@ -355,7 +330,7 @@ function setupScrollAnimations() {
         .fromTo('.hero .scroll-down', { opacity: 0, y: dir * 10 }, { opacity: 1, y: 0, duration: 0.8, ease: "power1.out" }, "-=1.0");
       return tl;
     },
-    // 1: About
+
     (dir) => {
       const tl = gsap.timeline();
       tl.fromTo('#about .profile-bg-large',
@@ -374,7 +349,7 @@ function setupScrollAnimations() {
       }
       return tl;
     },
-    // 2: Experience
+
     (dir) => {
       const tl = gsap.timeline();
       tl.fromTo('#experience .about-label', { opacity: 0, x: dir * -50 }, { opacity: 1, x: 0, duration: 1, ease: "power3.out" });
@@ -384,7 +359,7 @@ function setupScrollAnimations() {
       tl.set('#experience .list-item', { clearProps: 'transform' });
       return tl;
     },
-    // 3: Contact
+
     (dir) => {
       const tl = gsap.timeline();
       tl.fromTo('#contact .huge-text',
@@ -398,7 +373,7 @@ function setupScrollAnimations() {
   ];
 
   const exitAnimations = [
-    // 0: Hero
+
     (dir) => {
       const tl = gsap.timeline();
       tl.to('.hero .eyebrow', { opacity: 0, y: dir * -20, duration: 0.6, ease: "power2.in" })
@@ -407,7 +382,7 @@ function setupScrollAnimations() {
         .to('.hero .scroll-down', { opacity: 0, y: dir * 10, duration: 0.4 }, 0);
       return tl;
     },
-    // 1: About
+
     (dir) => {
       const tl = gsap.timeline();
       tl.to('#about .profile-bg-large', { opacity: 0, x: dir * -100, scale: 0.95, duration: 0.8, ease: "power3.in" }, 0);
@@ -419,14 +394,14 @@ function setupScrollAnimations() {
       if (keywords.length) tl.to(keywords, { opacity: 0, scale: 0.9, duration: 0.6, stagger: 0.05 }, 0.1);
       return tl;
     },
-    // 2: Experience
+
     (dir) => {
       const tl = gsap.timeline();
       tl.to('#experience .list-item', { opacity: 0, x: dir * -100, skewX: dir * 10, duration: 0.6, stagger: 0.1, ease: "power3.in" })
         .to('#experience .about-label', { opacity: 0, x: dir * -50, duration: 0.6, ease: "power3.in" }, 0.2);
       return tl;
     },
-    // 3: Contact
+
     (dir) => {
       const tl = gsap.timeline();
       tl.to('#contact .huge-text', { opacity: 0, y: dir * -80, filter: "blur(20px)", duration: 0.8, stagger: 0.1, ease: "power3.in" })
@@ -435,7 +410,6 @@ function setupScrollAnimations() {
     }
   ];
 
-  // Map 3D plane transforms to sections
   const webglStates = [
     { offset: 0.0, camY: 0, camZ: 2, rotZ: 0 },
     { offset: 1.2, camY: -0.2, camZ: 2.2, rotZ: -Math.PI * 0.05 },
@@ -452,18 +426,15 @@ function setupScrollAnimations() {
     const nextSection = sections[index];
     nextSection.scrollTop = direction > 0 ? 0 : nextSection.scrollHeight;
 
-    // Hide next section immediately to prevent premature flash
     gsap.set(nextSection, { autoAlpha: 0, zIndex: 30 });
     gsap.set(currentSection, { zIndex: 20 });
 
-    // Add active class (CSS opacity/visibility gets instantly overridden by the inline autoAlpha above)
     nextSection.classList.add('active');
 
-    // Orchestrate cross-fade / slide
     const tl = gsap.timeline({
       onComplete: () => {
         currentSection.classList.remove('active');
-        // Clean inline styles so CSS drives visibility again
+
         gsap.set(currentSection, { clearProps: "opacity,visibility,zIndex" });
         gsap.set(nextSection, { clearProps: "zIndex" });
         isAnimating = false;
@@ -471,24 +442,19 @@ function setupScrollAnimations() {
       }
     });
 
-    // 1. Exit current elements
     if (exitAnimations[currentIndex]) {
       tl.add(exitAnimations[currentIndex](direction), 0);
     }
 
-    // Fade out current section completely shortly before next section appears
     tl.to(currentSection, { autoAlpha: 0, duration: 0.4 }, 0.4);
 
-    // 2. 3D background shift
     const next3D = webglStates[index] || webglStates[0];
     tl.to(material.uniforms.uScrollOffset, { value: next3D.offset, duration: 1.2, ease: "power2.inOut" }, 0.2);
     tl.to(cameraRig, { y: next3D.camY, z: next3D.camZ, duration: 1.2, ease: "power2.inOut" }, 0.2);
     tl.to(plane.rotation, { z: next3D.rotZ, duration: 1.2, ease: "power2.inOut" }, 0.2);
 
-    // 3. Show next container precisely at 0.8s
     tl.set(nextSection, { autoAlpha: 1 }, 0.8);
 
-    // 4. Entry next elements
     if (entryAnimations[index]) {
       tl.add(entryAnimations[index](direction), 0.8);
     }
@@ -569,16 +535,12 @@ function setupScrollAnimations() {
 
 let sectionScrollLocked = false;
 
-// Ensure GSAP runs properly on init
 setTimeout(() => {
   setupScrollAnimations();
 }, 200);
 
-
-// --- ANIMATION BLENDING & RENDER LOOP ---
 const clock = new THREE.Clock();
 
-// Mouse parallax is an offset on the scroll rig, so section tweens keep the camera.
 let mouseOffsetX = 0;
 let mouseOffsetY = 0;
 let windowHalfX = window.innerWidth / 2;
@@ -588,37 +550,32 @@ const parallax = { x: 0, y: 0 };
 const frequencyBins = new Uint8Array(FREQUENCY_BINS);
 const bands = new Float32Array(8);
 
-// --- MOUSE TRACKING & RAYCASTING ---
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let targetMouseSpeed = 0;
 let lastMousePos = new THREE.Vector2();
 
 window.addEventListener('mousemove', (event) => {
-  // Normalize screen coordinates
+
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   mouseOffsetX = event.clientX - windowHalfX;
   mouseOffsetY = event.clientY - windowHalfY;
 
-  // Calculate mouse speed for intensity
   const tempMouse = new THREE.Vector2(event.clientX, event.clientY);
   const dist = tempMouse.distanceTo(lastMousePos);
-  targetMouseSpeed = Math.min(dist * 0.02, 1.0); // Clamp speed
+  targetMouseSpeed = Math.min(dist * 0.02, 1.0);
   lastMousePos.copy(tempMouse);
 
-  // Cast ray to intersect with our plane
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObject(plane); // Changed 'mesh' to 'plane'
+  const intersects = raycaster.intersectObject(plane);
 
   if (intersects.length > 0) {
-    // Pass the UV coordinate intersection to the shader
+
     material.uniforms.uMouse.value.copy(intersects[0].uv);
   }
 });
 
-
-// --- ANIMATION LOOP ---
 let previousTime = 0;
 
 const experienceCopy = [...document.querySelectorAll('#experience .description')];
@@ -770,18 +727,15 @@ const animate = () => {
   const deltaTime = elapsedTime - previousTime;
   previousTime = elapsedTime;
 
-  // Decay mouse speed back to zero automatically
   targetMouseSpeed *= 0.95;
   material.uniforms.uMouseSpeed.value += (targetMouseSpeed - material.uniforms.uMouseSpeed.value) * 0.1;
 
-  // Mouse parallax rides on top of the section camera rig
   parallax.x += (mouseOffsetX * 0.0005 - parallax.x) * 0.05;
   parallax.y += (mouseOffsetY * 0.0005 - parallax.y) * 0.05;
   camera.position.x = cameraRig.x + parallax.x;
   camera.position.y = cameraRig.y - parallax.y;
   camera.position.z = cameraRig.z;
 
-  // Update Shader Uniforms
   material.uniforms.uTime.value = elapsedTime;
   const bend = material.uniforms.uBend.value;
   if (bend > 0.98 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -790,7 +744,6 @@ const animate = () => {
     material.uniforms.uSpin.value = 0;
   }
 
-  // Handle Audio Reactivity — 8 frequency bands
   if (isPlaying() && copyFrequency(frequencyBins)) {
     const bandSize = Math.floor(frequencyBins.length / 8);
 
@@ -943,7 +896,6 @@ function drawContactSpectrum() {
 
 animate();
 
-// --- RESIZE HANDLER ---
 window.addEventListener('resize', () => {
   windowHalfX = window.innerWidth / 2;
   windowHalfY = window.innerHeight / 2;
@@ -952,7 +904,6 @@ window.addEventListener('resize', () => {
   applyRendererScale();
 });
 
-// --- DONUM THEME TOGGLE ---
 const donumBtn = document.getElementById('donum-btn');
 let isRisoTheme = false;
 
@@ -968,7 +919,6 @@ donumBtn.addEventListener('click', () => {
   const targetBase = isRisoTheme ? RISO_BASE : MONO_BASE;
   const targetPeak = isRisoTheme ? RISO_PEAK : MONO_PEAK;
 
-  // GSAP tween the shader colors smoothly over 0.8s
   gsap.to(material.uniforms.uColorBase.value, {
     r: targetBase.r, g: targetBase.g, b: targetBase.b,
     duration: 0.8, ease: 'power2.inOut'
@@ -978,7 +928,6 @@ donumBtn.addEventListener('click', () => {
     duration: 0.8, ease: 'power2.inOut'
   });
 
-  // Also shift the scene background
   gsap.to(scene.background, {
     r: isRisoTheme ? 0.05 : 0.03,
     g: isRisoTheme ? 0 : 0.03,

@@ -42,7 +42,7 @@ const mixDefaults = {
 const score = document.getElementById('score');
 score.loop = true;
 score.volume = 0.5;
-// Tape speed is varispeed: pitch follows the rate.
+
 score.preservesPitch = false;
 score.webkitPreservesPitch = false;
 

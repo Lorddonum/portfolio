@@ -1,20 +1,19 @@
-/* === MONO THEME (default) === */
+
 :root {
     --bg-color: #080808;
     --text-primary: #ededed;
     --text-secondary: #888888;
     --accent: #555555;
     --riso-a: #ff2d78;
-    /* magenta */
+
     --riso-b: #00e5ff;
-    /* cyan    */
+
     --riso-c: #ccff00;
-    /* lime    */
+
     --riso-d: #ff8c00;
-    /* orange  */
+
 }
 
-/* === RISO THEME (active when body.riso-theme) === */
 body.riso-theme {
     --bg-color: #0d001a;
     --text-primary: #f0e6ff;
@@ -33,11 +32,10 @@ body {
     color: var(--text-primary);
     font-family: 'Schibsted Grotesk', 'Inter', sans-serif;
     overflow: hidden;
-    /* Lock native scrolling */
+
     cursor: default;
 }
 
-/* Film Grain overlay */
 .noise {
     position: fixed;
     top: 0;
@@ -57,7 +55,7 @@ body {
     width: 100vw;
     height: 100vh;
     z-index: 1;
-    /* Behind UI, above background */
+
     outline: none;
 }
 
@@ -68,14 +66,12 @@ body {
     pointer-events: none;
 }
 
-/* Enable pointer events only on interactive parts */
 a,
 button,
 .audio-control {
     pointer-events: auto;
 }
 
-/* Header */
 .header {
     position: fixed;
     top: 0;
@@ -99,7 +95,7 @@ button,
     width: auto;
     display: block;
     mix-blend-mode: screen;
-    /* screen blend removes the black background — only white logo shows, and still inverts against the page shader */
+
 }
 
 .audio-control {
@@ -153,7 +149,6 @@ button.audio-control:focus-visible,
     background: var(--text-primary);
 }
 
-/* Audio panel (play/pause dropdown below sound toggle) */
 .audio-panel {
     display: none;
     position: absolute;
@@ -194,7 +189,6 @@ button.audio-control:focus-visible,
     border-color: rgba(255, 255, 255, 0.5);
 }
 
-/* Seeking the audio on top edge */
 .seek-bar-container {
     position: fixed;
     top: 0;
@@ -233,7 +227,6 @@ button.audio-control:focus-visible,
     transition: width 0.2s linear;
 }
 
-/* dot/thumb at the playhead — appears on track hover */
 .seek-bar-fill::after {
     content: '';
     position: absolute;
@@ -265,8 +258,6 @@ button.audio-control:focus-visible,
     transition: opacity 0.2s;
 }
 
-
-/* Typography */
 .huge-text {
     font-size: clamp(4rem, 12vw, 15rem);
     font-weight: 500;
@@ -292,15 +283,13 @@ button.audio-control:focus-visible,
     margin-left: 15%;
 }
 
-/* === HERO ROW (ATAE + DONUM) === */
 .hero-row {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    /* DONUM right edge matches KHATBANE right edge naturally */
+
 }
 
-/* === DONUM BUTTON — risograph/technicolor === */
 @keyframes risoShift {
     0% {
         text-shadow: 4px 0 var(--riso-a), -4px 0 var(--riso-b), 0 3px var(--riso-c);
@@ -353,7 +342,7 @@ button.audio-control:focus-visible,
     line-height: 0.85;
     letter-spacing: -0.04em;
     text-transform: uppercase;
-    /* Riso chromatic aberration baseline */
+
     color: var(--riso-c);
     text-shadow:
         4px 0 var(--riso-a),
@@ -370,7 +359,6 @@ button.audio-control:focus-visible,
     filter: brightness(1.3) contrast(1.1);
 }
 
-/* In riso theme the button pulses stronger */
 body.riso-theme .donum-btn {
     filter: saturate(1.5) brightness(1.2);
     text-shadow:
@@ -380,7 +368,6 @@ body.riso-theme .donum-btn {
         0 -3px var(--riso-c);
 }
 
-/* === RISO-HAZE — right-side screen warp overlay === */
 .riso-haze {
     position: absolute;
     top: 0;
@@ -398,7 +385,6 @@ body.riso-theme .donum-btn {
     transition: opacity 0.6s;
 }
 
-/* Haze strengthens in riso mode */
 body.riso-theme .riso-haze {
     background:
         radial-gradient(ellipse at 90% 40%, rgba(255, 45, 120, 0.22) 0%, transparent 70%),
@@ -406,7 +392,6 @@ body.riso-theme .riso-haze {
         radial-gradient(ellipse at 100% 10%, rgba(204, 255, 0, 0.14) 0%, transparent 50%);
 }
 
-/* Scanline-style horizontal banding on right side when riso active */
 body.riso-theme .riso-haze::after {
     content: '';
     position: absolute;
@@ -419,7 +404,6 @@ body.riso-theme .riso-haze::after {
     mix-blend-mode: screen;
 }
 
-/* Riso theme — global color transitions */
 body,
 #webgl,
 .header,
@@ -429,7 +413,7 @@ body,
 }
 
 .mask-text {
-    /* For entry animations */
+
     clip-path: polygon(0 0, 100% 0, 100% 100%, 0% 100%);
 }
 
@@ -460,7 +444,7 @@ body,
 
 .matrix-text-container {
     max-width: 800px;
-    /* Wider for the paragraph format */
+
 }
 
 .matrix-text {
@@ -475,21 +459,19 @@ body,
     font-weight: 400;
 }
 
-/* We will use GSAP to animate these spans later */
 .matrix-text .word {
     display: inline-block;
     opacity: 0;
-    /* Hidden by default until GSAP reveals them */
+
     transform: translateY(10px);
 }
 
 .matrix-text .keyword.word {
     opacity: 1;
-    /* Keywords might be visible early, handled by JS */
+
     transform: translateY(0);
 }
 
-/* Layout */
 .scroll-wrapper {
     position: relative;
     width: 100%;
@@ -539,7 +521,6 @@ body,
     }
 }
 
-/* --- Editorial About Section --- */
 .about-layout {
     position: relative;
     display: block;
@@ -586,12 +567,12 @@ body,
     right: -5%;
     bottom: -10%;
     height: 120%;
-    /* Massive backdrop */
+
     width: auto;
     object-fit: contain;
     z-index: 0;
     opacity: 0.7;
-    /* Reduced transparency */
+
     filter: grayscale(100%) contrast(1.2);
     pointer-events: none;
     mask-image: linear-gradient(to top, rgba(0, 0, 0, 1) 50%, rgba(0, 0, 0, 0) 100%);
@@ -650,7 +631,7 @@ p.matrix-text:last-child {
 
     .profile-bg-large {
         opacity: 0.1;
-        /* Even more subtle on mobile */
+
         right: -20%;
     }
 
@@ -664,7 +645,6 @@ p.matrix-text:last-child {
     }
 }
 
-/* Lists */
 .list {
     border-top: 1px solid var(--accent);
 }
@@ -709,7 +689,6 @@ p.matrix-text:last-child {
     font-size: 0.85rem;
 }
 
-/* Link Button */
 .link-btn {
     display: inline-block;
     margin-top: 3rem;
@@ -725,7 +704,6 @@ p.matrix-text:last-child {
     border-color: var(--text-primary);
 }
 
-/* Scroll indicator */
 .scroll-down {
     position: absolute;
     bottom: 4rem;
@@ -869,7 +847,6 @@ p.matrix-text:last-child {
     }
 }
 
-/* Section rail — same hairline language as the scroll mark */
 .section-nav {
     position: fixed;
     right: 1.6rem;

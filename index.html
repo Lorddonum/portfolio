@@ -5,7 +5,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Atae KHATBANE</title>
-  <!-- Modern, clean typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -16,16 +15,12 @@
 </head>
 
 <body>
-  <!-- Film Grain Overlay -->
   <div class="noise"></div>
 
-  <!-- WebGL Canvas for Fluid Plane -->
   <canvas id="webgl"></canvas>
 
-  <!-- UI Overlay for Scroll content -->
   <div id="ui-container">
 
-    <!-- Top seek bar -->
     <div class="seek-bar-container" id="seek-bar-container">
       <div class="seek-bar-track" id="seek-bar-track">
         <div class="seek-bar-fill" id="seek-bar-fill"></div>
@@ -36,9 +31,7 @@
       </div>
     </div>
 
-    <!-- Minimal Header -->
     <header class="header">
-      <!-- Left side: Mix Studio button -->
       <button type="button" class="audio-control" id="mix-studio-toggle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" width="18" height="18">
@@ -52,7 +45,6 @@
         Mix Studio
       </button>
 
-      <!-- Right side: Sound Toggle. Play sits outside the toggle so it does not turn sound off. -->
       <div class="audio-cluster">
         <button type="button" class="audio-control" id="audio-toggle">
           <span class="indicator"></span> Sound: <span id="audio-status">OFF</span>
@@ -70,22 +62,16 @@
       </div>
     </header>
 
-    <!-- (Mixing Studio Overlay Removed - Moved to mix.html) -->
-
     <div class="scroll-wrapper">
 
-      <!-- Section 1: Hero -->
       <section class="panel hero active" id="home">
-        <!-- Risograph haze — warps the right side of the screen visually -->
         <div class="riso-haze" id="riso-haze"></div>
         <div class="content">
           <p class="eyebrow">Computer Engineer // Casablanca</p>
-          <!-- Row 1: ATAE (left) + DONUM (right, aligned to KHATBANE's end) -->
           <div class="hero-row">
             <h1 class="huge-text mask-text">Atae</h1>
             <button class="donum-btn" id="donum-btn" title="Switch Theme">DONUM</button>
           </div>
-          <!-- Row 2: KHATBANE indented -->
           <h1 class="huge-text mask-text indent">Khatbane</h1>
         </div>
         <div class="scroll-down">
@@ -94,7 +80,6 @@
         </div>
       </section>
 
-      <!-- Section 2: About -->
       <section class="panel about" id="about">
         <div class="content flex-layout about-layout">
           <img src="/profile.png" alt="Atae KHATBANE Backdrop" class="profile-bg-large">
@@ -135,7 +120,6 @@
         </div>
       </section>
 
-      <!-- Section 3: Experience -->
       <section class="panel experience" id="experience">
         <div class="content">
           <h2 class="about-label">Experience & Edu.</h2>
@@ -197,7 +181,6 @@
         </div>
       </section>
 
-      <!-- Section 4: Footer -->
       <section class="panel footer" id="contact">
         <div class="content">
           <h1 class="huge-text contact-spectrum" id="contact-getin"><span id="contact-getin-label">Get in</span><canvas id="contact-spectrum" aria-hidden="true"></canvas></h1>

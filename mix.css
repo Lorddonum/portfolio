@@ -31,12 +31,11 @@
 
 .eq-row {
     flex-wrap: nowrap;
-    /* Force 3 knobs onto one line */
+
     gap: 0.5rem;
-    /* Tighter gap to fit 3 knobs */
+
 }
 
-/* Make EQ knobs slightly smaller so 3 can fit without overflowing the panel width */
 .eq-row .knob-container {
     width: 65px;
     gap: 0.5rem;
@@ -47,8 +46,6 @@
     justify-content: center;
     margin-top: 1rem;
 }
-
-
 
 .mix-title-group {
     display: flex;
@@ -188,7 +185,6 @@ button.mix-close {
     transform: rotate(90deg) scale(1.1);
 }
 
-/* Transport (Play/Pause/Seek) */
 .transport {
     display: flex;
     align-items: center;
@@ -271,7 +267,6 @@ button.mix-close {
     color: var(--text-secondary);
 }
 
-/* Glass Panels */
 .glass-panel {
     background: rgba(15, 15, 15, 0.6);
     backdrop-filter: blur(16px);
@@ -289,7 +284,6 @@ button.mix-close {
     border-top: 1px solid rgba(255, 255, 255, 0.25);
 }
 
-/* Top Deck Layout */
 .deck-top {
     display: flex;
     gap: 1.25rem;
@@ -360,7 +354,7 @@ button.mix-close {
     position: relative;
     overflow: hidden;
     gap: 0.5rem;
-    /* Space between spectrum and oscilloscope */
+
 }
 
 .visualizer canvas {
@@ -375,7 +369,6 @@ button.mix-close {
     padding-top: 0.5rem;
 }
 
-/* UI Grid */
 .mix-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -423,10 +416,9 @@ button.mix-close {
     grid-column: span 2;
 }
 
-/* Unified Compressor + Master Output Panel */
 .master-unified {
     grid-column: 1 / -1;
-    /* Full width, spanning all grid columns */
+
     background: rgba(255, 45, 120, 0.03);
     border-color: rgba(255, 45, 120, 0.2);
     display: flex;
@@ -462,7 +454,6 @@ button.mix-close {
     gap: 1rem;
 }
 
-/* Custom Rotary Knobs */
 .knob-container {
     display: flex;
     flex-direction: column;
@@ -560,7 +551,6 @@ button.mix-close {
     box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 45, 120, 0.4);
 }
 
-/* Master Layout */
 .master-layout {
     display: flex;
     justify-content: space-between;
@@ -571,7 +561,6 @@ button.mix-close {
     margin-top: 1.5rem;
 }
 
-/* LED Peak Meter */
 .meter-container {
     display: flex;
     gap: 0.5rem;
@@ -595,7 +584,7 @@ button.mix-close {
 .meter-fill {
     width: 100%;
     height: 0%;
-    /* Dynamic via JS */
+
     background: linear-gradient(to top,
             #00e5ff 0%,
             #00e5ff 60%,
@@ -610,11 +599,11 @@ button.mix-close {
 .gr-meter .meter-track {
     justify-content: flex-start;
     width: 18px;
-    /* Wider than the peak meter */
+
 }
 
 .gr-meter .meter-fill {
-    /* Gain reduction meter drops from the top down */
+
     align-self: stretch;
     background: linear-gradient(to bottom, #ff2d78, #ff6ba8);
     box-shadow: 0 0 14px rgba(255, 45, 120, 0.9);
@@ -648,7 +637,6 @@ button.mix-close {
     width: 100%;
 }
 
-/* --- Varispeed Vertical Slider --- */
 .varispeed-group {
     display: flex;
     flex-direction: column;
@@ -665,7 +653,7 @@ button.mix-close {
 
 .varispeed-slider input[type="range"] {
     writing-mode: bt-lr;
-    /* IE */
+
     appearance: slider-vertical;
     -webkit-appearance: slider-vertical;
     width: 8px;
@@ -694,7 +682,6 @@ button.mix-close {
     margin-left: 1.5rem;
 }
 
-/* Custom Toggle Switch for Limiter */
 .toggle-label {
     display: flex;
     align-items: center;

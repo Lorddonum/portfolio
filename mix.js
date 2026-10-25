@@ -118,7 +118,7 @@ function resizeCanvas() {
     oscCanvas.style.height = halfHeight + 'px';
 }
 window.addEventListener('resize', resizeCanvas);
-resizeCanvas(); // Initial call
+resizeCanvas();
 
 let peakVolume = 0;
 let grPeakHold = 0;
@@ -202,8 +202,6 @@ function drawVisualizer() {
     applyPeakGlow(cappedPeak);
 }
 
-// --- UI Wiring (Custom SVG Knobs) ---
-
 function createKnob(containerId, onChangeFn) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -216,7 +214,6 @@ function createKnob(containerId, onChangeFn) {
     const sub = container.dataset.sub || "";
     const isLog = container.dataset.log === "true";
 
-    // Build DOM
     container.innerHTML = `
         <span class="knob-label">${label}</span>
         ${sub ? `<span class="knob-sub">${sub}</span>` : ''}
@@ -227,14 +224,14 @@ function createKnob(containerId, onChangeFn) {
                     <stop offset="100%" stop-color="#0a0a0a" />
                 </linearGradient>
             </defs>
-            <!-- Background track -->
+
             <path class="knob-track" d="M 20 80 A 40 40 0 1 1 80 80" />
-            <!-- Fill arc -->
+
             <path class="knob-fill" d="" />
-            <!-- Inner Dial -->
+
             <circle class="knob-base" cx="50" cy="50" r="30" />
             <circle class="knob-dial" cx="50" cy="50" r="26" />
-            <!-- Indicator Line -->
+
             <line class="knob-indicator" x1="50" y1="50" x2="50" y2="28" />
         </svg>
         <div class="val-display">${formatVal(val)}${suffix}</div>
@@ -257,16 +254,13 @@ function createKnob(containerId, onChangeFn) {
     }
 
     function updateVisuals(normalized) {
-        // Normalized is 0.0 to 1.0
-        // Angle range: -135 to +135 degrees (0 starts at top)
+
         const angle = -135 + (normalized * 270);
 
-        // Rotate indicator line
         indicator.setAttribute('transform', `rotate(${angle}, 50, 50)`);
 
-        // Draw arc
         const endAngleRad = (angle - 90) * (Math.PI / 180);
-        const startAngleRad = -225 * (Math.PI / 180); // -135 - 90
+        const startAngleRad = -225 * (Math.PI / 180);
 
         const r = 40;
         const cx = 50;
@@ -278,7 +272,7 @@ function createKnob(containerId, onChangeFn) {
         const endX = cx + r * Math.cos(endAngleRad);
         const endY = cy + r * Math.sin(endAngleRad);
 
-        const largeArcFlag = normalized > 0.666 ? 1 : 0; // > 180 degrees
+        const largeArcFlag = normalized > 0.666 ? 1 : 0;
 
         const d = `M ${startX} ${startY} A ${r} ${r} 0 ${largeArcFlag} 1 ${endX} ${endY}`;
         fillPath.setAttribute('d', d);
@@ -288,17 +282,16 @@ function createKnob(containerId, onChangeFn) {
 
     function setValFromNormalized(norm) {
         if (isLog) {
-            // Logarithmic mapping (e.g. for frequencies 20Hz - 20kHz)
+
             const minLog = Math.log10(min);
             const maxLog = Math.log10(max);
             const scale = maxLog - minLog;
             val = Math.pow(10, minLog + scale * norm);
         } else {
-            // Linear mapping
+
             val = min + (max - min) * norm;
         }
 
-        // Clamp
         val = Math.max(min, Math.min(max, val));
 
         updateVisuals(norm);
@@ -317,7 +310,6 @@ function createKnob(containerId, onChangeFn) {
         updateVisuals(norm);
     }
 
-    // Events
     svg.addEventListener('mousedown', (e) => {
         isDragging = true;
         startY = e.clientY;
@@ -329,7 +321,7 @@ function createKnob(containerId, onChangeFn) {
         if (!isDragging) return;
 
         const deltaY = startY - e.clientY;
-        // Sensitivity: 200px drag = full range
+
         const deltaNorm = deltaY / 200;
 
         let startNorm = 0;
@@ -352,7 +344,6 @@ function createKnob(containerId, onChangeFn) {
 
     initFromDataVal();
 
-    // Return a method so presets can programmatically update this knob
     return {
         setValue: function (newVal) {
             val = Math.max(min, Math.min(max, newVal));
@@ -370,7 +361,6 @@ function createKnob(containerId, onChangeFn) {
     };
 }
 
-// Initialize all knobs and store their control objects
 const knobs = {
     'eq-low': createKnob('eq-low', (gain) => setMixParam('eqLow', gain)),
     'eq-mid': createKnob('eq-mid', (gain) => setMixParam('eqMid', gain)),
@@ -407,7 +397,6 @@ for (const [id, amount] of Object.entries(knobMix)) {
     knobs[id].setValue(amount);
 }
 
-// --- Mono Toggle ---
 const monoToggle = document.getElementById('stereo-mono');
 monoToggle.addEventListener('change', (event) => {
     if (event.target.checked) {
@@ -431,7 +420,6 @@ tapeSpeedSlider.value = storedMix.tapeSpeed;
 tapeSpeedVal.textContent = storedMix.tapeSpeed.toFixed(2) + 'x';
 monoToggle.checked = storedMix.mono;
 
-// --- Presets Logic ---
 const presets = {
     flat: { 'eq-low': 0, 'eq-mid': 0, 'eq-high': 0, 'filter-hp': 20, 'filter-lp': 20000, 'fx-dist': 0, 'fx-reverb': 0, 'master-vol': 0.5 },
     club: { 'eq-low': 4.5, 'eq-mid': -1.5, 'eq-high': 2.0, 'filter-hp': 40, 'filter-lp': 18000, 'fx-dist': 2.5, 'fx-reverb': 0.15, 'master-vol': 0.55 },
@@ -442,11 +430,10 @@ const presets = {
 const presetBtns = document.querySelectorAll('.preset-btn');
 presetBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
-        // Update active class
+
         presetBtns.forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
 
-        // Apply preset values
         const presetName = e.target.dataset.preset;
         const config = presets[presetName];
         if (config) {
@@ -458,7 +445,6 @@ presetBtns.forEach(btn => {
         }
     });
 });
-
 
 const limiterToggle = document.getElementById('master-limiter');
 limiterToggle.checked = storedMix.limiter;
