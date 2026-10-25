@@ -49,7 +49,18 @@ score.webkitPreservesPitch = false;
 const listeners = new Set();
 const mix = { ...mixDefaults, ...readStoredMix() };
 
+const SESSION_SRC = '/mix-session.mp3';
+const AUDIO_NAME = /\.(mp3|wav|ogg|flac|m4a|aac|webm|aiff|aif)$/i;
+
 let sessionOpen = false;
+let guestUrl = '';
+let guestName = '';
+let heldSessionTime = 0;
+let masterOut = null;
+let bounceDest = null;
+let recorder = null;
+let bounceChunks = [];
+let recording = false;
 let playheadReady = mix.currentTime <= 0;
 let persistTimer = 0;
 let audioCtx = null;
@@ -79,6 +90,10 @@ score.addEventListener('play', () => emit('transport'));
 score.addEventListener('pause', () => emit('transport'));
 score.addEventListener('timeupdate', () => {
   if (!playheadReady) return;
+  if (guestUrl) {
+    emit('time');
+    return;
+  }
   mix.currentTime = score.currentTime;
   emit('time');
   schedulePersist();
@@ -168,9 +183,185 @@ export function seekToFraction(fraction) {
   const clamped = Math.min(1, Math.max(0, fraction));
   playheadReady = true;
   score.currentTime = clamped * score.duration;
-  mix.currentTime = score.currentTime;
+  if (!guestUrl) mix.currentTime = score.currentTime;
+  emit('time');
+  if (!guestUrl) persistMix();
+}
+
+export function seekBy(seconds) {
+  if (!Number.isFinite(score.duration) || score.duration <= 0) return;
+  const next = Math.min(score.duration, Math.max(0, score.currentTime + seconds));
+  seekToFraction(next / score.duration);
+}
+
+export function bindSeekKeys(track) {
+  track.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowRight') seekBy(5);
+    else if (event.key === 'ArrowLeft') seekBy(-5);
+    else if (event.key === 'Home') seekToFraction(0);
+    else if (event.key === 'End') seekToFraction(1);
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+}
+
+function isAudioFile(file) {
+  if (!file) return false;
+  return file.type.startsWith('audio/') || AUDIO_NAME.test(file.name);
+}
+
+function whenReady() {
+  return new Promise((resolve, reject) => {
+    const ready = () => {
+      score.removeEventListener('error', failed);
+      resolve();
+    };
+    const failed = () => {
+      score.removeEventListener('loadedmetadata', ready);
+      reject(new Error('unreadable audio'));
+    };
+    score.addEventListener('loadedmetadata', ready, { once: true });
+    score.addEventListener('error', failed, { once: true });
+  });
+}
+
+async function setSource(url) {
+  playheadReady = false;
+  const ready = whenReady();
+  score.src = url;
+  await ready;
+}
+
+async function resumeIf(wasPlaying) {
+  if (!wasPlaying) return;
+  try {
+    await score.play();
+  } catch (error) {
+    if (error.name !== 'NotAllowedError' && error.name !== 'AbortError') throw error;
+  }
+}
+
+function placeHeldTime() {
+  const duration = score.duration;
+  const capped = Number.isFinite(duration) && duration > 0
+    ? Math.min(heldSessionTime, Math.max(0, duration - 0.05))
+    : 0;
+  score.currentTime = capped;
+  mix.currentTime = capped;
+}
+
+async function restoreSource(previous) {
+  await setSource(previous || SESSION_SRC);
+  playheadReady = true;
+}
+
+export function trackLabel() {
+  return guestName || 'Session';
+}
+
+export async function useAudioFile(file) {
+  if (!isAudioFile(file)) return false;
+  const url = URL.createObjectURL(file);
+  const wasPlaying = !score.paused;
+  if (!guestUrl) heldSessionTime = score.currentTime || mix.currentTime || 0;
+  const previous = guestUrl;
+  try {
+    await setSource(url);
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    if (error.message !== 'unreadable audio') throw error;
+    await restoreSource(previous);
+    return false;
+  }
+  if (previous) URL.revokeObjectURL(previous);
+  guestUrl = url;
+  guestName = file.name;
+  score.currentTime = 0;
+  playheadReady = true;
+  emit('source');
+  emit('time');
+  await resumeIf(wasPlaying);
+  return true;
+}
+
+export async function useSessionTrack() {
+  if (!guestUrl) return;
+  const wasPlaying = !score.paused;
+  const url = guestUrl;
+  const name = guestName;
+  guestUrl = '';
+  guestName = '';
+  try {
+    await setSource(SESSION_SRC);
+  } catch (error) {
+    guestUrl = url;
+    guestName = name;
+    throw error;
+  }
+  URL.revokeObjectURL(url);
+  placeHeldTime();
+  playheadReady = true;
+  emit('source');
   emit('time');
   persistMix();
+  await resumeIf(wasPlaying);
+}
+
+export function isBouncing() {
+  return recording;
+}
+
+function bounceMime() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+  return types.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+}
+
+function saveBounce(blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  const stem = (guestName || 'session').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
+  const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
+  link.download = `${stem || 'session'}-mix.${ext}`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function collectBounce() {
+  const blob = new Blob(bounceChunks, { type: recorder.mimeType });
+  bounceChunks = [];
+  recording = false;
+  emit('bounce');
+  if (blob.size > 0) saveBounce(blob);
+}
+
+export async function startBounce() {
+  if (recording) return;
+  const mime = bounceMime();
+  if (!mime) throw new Error('recording unsupported');
+  buildGraph();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  if (score.paused) {
+    sessionOpen = true;
+    await startPlayback();
+  }
+  if (score.paused) return;
+  bounceChunks = [];
+  recorder = new MediaRecorder(bounceDest.stream, { mimeType: mime });
+  recorder.addEventListener('dataavailable', (event) => {
+    if (event.data.size > 0) bounceChunks.push(event.data);
+  });
+  recorder.addEventListener('stop', collectBounce, { once: true });
+  recorder.start();
+  recording = true;
+  emit('bounce');
+}
+
+export function stopBounce() {
+  if (!recording || recorder.state === 'inactive') return;
+  recorder.stop();
 }
 
 const sharedFrequency = new Uint8Array(FREQUENCY_BINS);
@@ -333,7 +524,7 @@ function buildGraph() {
   limiter.release.value = 0.05;
   limiterSend = audioCtx.createGain();
   limiterBypass = audioCtx.createGain();
-  const output = audioCtx.createGain();
+  masterOut = audioCtx.createGain();
 
   const desk = wireStereo(audioCtx);
 
@@ -355,12 +546,14 @@ function buildGraph() {
   desk.output.connect(masterVol);
   masterVol.connect(limiterSend);
   limiterSend.connect(limiter);
-  limiter.connect(output);
+  limiter.connect(masterOut);
   masterVol.connect(limiterBypass);
-  limiterBypass.connect(output);
-  output.connect(analyser);
-  output.connect(waveAnalyser);
+  limiterBypass.connect(masterOut);
+  masterOut.connect(analyser);
+  masterOut.connect(waveAnalyser);
   analyser.connect(audioCtx.destination);
+  bounceDest = audioCtx.createMediaStreamDestination();
+  masterOut.connect(bounceDest);
 
   applyStoredParams();
 }

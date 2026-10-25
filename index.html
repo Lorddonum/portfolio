@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&family=Playfair+Display:ital,wght@0,400;1,400&family=Space+Mono:wght@400&display=swap"
     rel="stylesheet">
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./mix.css">
@@ -22,7 +22,7 @@
   <div id="ui-container">
 
     <div class="seek-bar-container" id="seek-bar-container">
-      <div class="seek-bar-track" id="seek-bar-track">
+        <div class="seek-bar-track" id="seek-bar-track" role="slider" tabindex="0" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div class="seek-bar-fill" id="seek-bar-fill"></div>
       </div>
       <div class="seek-time">
@@ -81,16 +81,15 @@
       </section>
 
       <section class="panel about" id="about">
-        <div class="content flex-layout about-layout">
-          <img src="/profile.png" alt="Atae KHATBANE Backdrop" class="profile-bg-large">
-
-          <div class="about-content-wrapper">
+        <div class="content about-layout">
+          <div class="about-spread">
+            <div class="about-content-wrapper">
             <div class="about-label">About.</div>
             <div class="about-editorial">
-              <h2 class="editorial-headline">I build systems,<br><i>break limits</i>, <br>and respect the logic.</h2>
+              <h2 class="editorial-headline">I build systems,<br>break limits,<br>and respect the logic.</h2>
 
               <div class="editorial-body-spacious">
-                <div class="text-block matrix-text-container editorial-text-clean">
+                <div class="text-block matrix-text-container">
                   <p class="matrix-text">
                     I'm a <span class="keyword font-mono">software engineer</span> based in Casablanca. I genuinely
                     enjoy
@@ -116,6 +115,8 @@
                 </div>
               </div>
             </div>
+            </div>
+            <img src="/profile.png" alt="Atae Khatbane" class="profile-bg-large">
           </div>
         </div>
       </section>
@@ -216,6 +217,12 @@
             <button type="button" class="preset-btn" data-preset="lofi">VINTAGE</button>
             <button type="button" class="preset-btn" data-preset="bass">SUB BOOST</button>
           </div>
+          <div class="track-source">
+            <button type="button" class="preset-btn" id="load-track">Load</button>
+            <button type="button" class="preset-btn" id="use-session" hidden>Session</button>
+            <span id="track-name">Session</span>
+            <input id="track-file" type="file" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.webm" hidden>
+          </div>
         </div>
 
         <div class="transport glass-panel">
@@ -228,7 +235,7 @@
             </svg>
           </button>
           <div class="seek-bar-container" id="mix-seek">
-            <div class="seek-bar-track" id="mix-seek-track">
+            <div class="seek-bar-track" id="mix-seek-track" role="slider" tabindex="0" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div class="seek-bar-fill" id="mix-seek-fill"></div>
             </div>
             <div class="seek-time">
@@ -369,6 +376,7 @@
                   <input type="checkbox" id="master-limiter" checked>
                   <span class="toggle-slider"></span>
                 </label>
+                <button type="button" class="preset-btn" id="bounce-mix" aria-pressed="false">Bounce</button>
               </div>
             </div>
           </div>
@@ -377,7 +385,7 @@
     </div>
   </div>
 
-  <audio id="score" src="/groovy deep house mix session.mp3" loop preload="metadata"></audio>
+  <audio id="score" src="/mix-session.mp3" loop preload="metadata"></audio>
 
   <script type="module" src="/main.js"></script>
 </body>

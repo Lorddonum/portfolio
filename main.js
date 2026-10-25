@@ -5,10 +5,12 @@ import {
   toggleSession,
   togglePlayback,
   seekToFraction,
+  bindSeekKeys,
   subscribe,
   isSessionOpen,
   isPlaying,
   playbackTime,
+  getMix,
   copyFrequency,
   FREQUENCY_BINS,
 } from './audioEngine.js';
@@ -76,7 +78,12 @@ function renderSeek() {
   seekBarFill.style.width = `${(current / duration) * 100}%`;
   seekCurrent.textContent = formatTime(current);
   seekTotal.textContent = formatTime(duration);
+  const fraction = current / duration;
+  seekBarTrack.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
+  seekBarTrack.setAttribute('aria-valuetext', formatTime(current));
 }
+
+bindSeekKeys(seekBarTrack);
 
 subscribe((type) => {
   if (type === 'transport') renderTransport();
@@ -96,7 +103,19 @@ seekBarTrack.addEventListener('click', (event) => {
   seekToFraction((event.clientX - rect.left) / rect.width);
 });
 
-const geometry = new THREE.PlaneGeometry(10, 6, 300, 120);
+const phoneQuery = window.matchMedia('(max-width: 768px)');
+
+function surfaceSegments() {
+  if (phoneQuery.matches) return [100, 40];
+  return [300, 120];
+}
+
+function createSurface() {
+  const [across, down] = surfaceSegments();
+  return new THREE.PlaneGeometry(10, 6, across, down);
+}
+
+let geometry = createSurface();
 
 const material = new THREE.ShaderMaterial({
   wireframe: false,
@@ -117,7 +136,9 @@ const material = new THREE.ShaderMaterial({
     uMouse: { value: new THREE.Vector2(0.5, 0.5) },
     uMouseSpeed: { value: 0.0 },
     uBend: { value: 0 },
-    uSpin: { value: 0 }
+    uSpin: { value: 0 },
+    uDrive: { value: 0 },
+    uReverb: { value: 0 }
   },
   vertexShader: `
     uniform float uTime;
@@ -128,6 +149,8 @@ const material = new THREE.ShaderMaterial({
     uniform float uMouseSpeed;
     uniform float uBend;
     uniform float uSpin;
+    uniform float uDrive;
+    uniform float uReverb;
 
     varying float vElevation;
     varying float vBandEnergy;
@@ -205,7 +228,9 @@ const material = new THREE.ShaderMaterial({
       float mouseEffect = mouseRipple * uMouseSpeed * 1.5;
 
       float fine = snoise(vec2(pos.x * 2.6 + uTime * 0.04, pos.y * 3.1 - uTime * 0.03)) * 0.018;
-      float elevation = ambientWave + eqSpike + ripple + scrollWave + mouseEffect + fine;
+      float grit = snoise(vec2(pos.x * 7.5 + uTime * 1.6, pos.y * 5.5 - uTime * 0.9)) * uDrive * 0.28;
+      float tail = snoise(vec2(pos.x * 0.28 - uTime * 0.07, pos.y * 0.22 + uTime * 0.04)) * uReverb * 0.34;
+      float elevation = ambientWave + eqSpike + ripple + scrollWave + mouseEffect + fine + grit + tail;
       float seam = smoothstep(0.88, 0.97, abs(nx));
       float closedEdge = snoise(vec2(2.5 + uTime * 0.15, pos.y * 0.5 + uTime * 0.1)) * 0.12
         + snoise(vec2(2.0, pos.y + uScrollOffset)) * 0.08;
@@ -250,6 +275,8 @@ const material = new THREE.ShaderMaterial({
     uniform vec3 uColorBase;
     uniform vec3 uColorPeak;
     uniform float uBend;
+    uniform float uDrive;
+    uniform float uReverb;
     
     varying float vElevation;
     varying float vBandEnergy;
@@ -280,6 +307,8 @@ const material = new THREE.ShaderMaterial({
       vec3 color = mix(uColorBase, uColorPeak, clamp(ink, 0.0, 1.0));
       color += uColorPeak * spec * crest * mix(0.18, 0.08, curl);
       color += uColorPeak * vBandEnergy * 0.1;
+      color += uColorPeak * uDrive * crest * 0.45;
+      color = mix(color, uColorPeak, uReverb * (0.18 + crest * 0.22) * 0.22);
 
       float fog = smoothstep(5.5, 13.0, length(cameraPosition - vWorldPos));
       color = mix(color, uColorBase, fog * mix(0.65, 0.35, curl));
@@ -290,6 +319,23 @@ const material = new THREE.ShaderMaterial({
 });
 
 const plane = new THREE.Mesh(geometry, material);
+const pointerPlane = new THREE.Mesh(new THREE.PlaneGeometry(10, 6, 1, 1));
+
+function fitSurface() {
+  const [across, down] = surfaceSegments();
+  if (geometry.parameters.widthSegments === across && geometry.parameters.heightSegments === down) return;
+  const next = createSurface();
+  geometry.dispose();
+  geometry = next;
+  plane.geometry = geometry;
+}
+
+function matchPointerPlane() {
+  pointerPlane.position.copy(plane.position);
+  pointerPlane.rotation.copy(plane.rotation);
+  pointerPlane.scale.copy(plane.scale);
+  pointerPlane.updateMatrixWorld();
+}
 plane.rotation.x = -Math.PI * 0.38;
 plane.rotation.z = Math.PI * 0.08;
 plane.position.y = -1.2;
@@ -475,10 +521,7 @@ function setupScrollAnimations() {
     gotoSection(currentIndex + direction, direction);
   }
 
-  const phoneQuery = window.matchMedia('(max-width: 768px)');
-
   function panelCanConsume(direction) {
-    if (!phoneQuery.matches) return false;
     const panel = document.querySelector('.panel.active');
     if (!panel) return false;
     const max = panel.scrollHeight - panel.clientHeight;
@@ -514,7 +557,7 @@ function setupScrollAnimations() {
 
   window.addEventListener('keydown', (event) => {
     if (sectionScrollLocked) return;
-    if (event.target.closest('input, textarea, select')) return;
+    if (event.target.closest('input, textarea, select, [role="slider"], .knob-container')) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
 
     if (event.key === 'ArrowDown' || event.key === 'PageDown') {
@@ -540,6 +583,7 @@ setTimeout(() => {
 }, 200);
 
 const clock = new THREE.Clock();
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 let mouseOffsetX = 0;
 let mouseOffsetY = 0;
@@ -568,7 +612,8 @@ window.addEventListener('mousemove', (event) => {
   lastMousePos.copy(tempMouse);
 
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObject(plane);
+  matchPointerPlane();
+  const intersects = raycaster.intersectObject(pointerPlane);
 
   if (intersects.length > 0) {
 
@@ -576,156 +621,10 @@ window.addEventListener('mousemove', (event) => {
   }
 });
 
-let previousTime = 0;
-
-const experienceCopy = [...document.querySelectorAll('#experience .description')];
-const copyShade = new WeakMap();
-
-function shadeForBackground(signal, currentlyLight) {
-  const preferLight = currentlyLight ? signal < 0.38 : signal < 0.26;
-  if (preferLight) return Math.min(1, Math.max(0.78, 1 - signal * 1.1));
-  const lift = Math.min(1, Math.max(0, (signal - 0.26) / 0.6));
-  return 0.18 - lift * 0.13;
-}
-
-let shadeRow = new Uint8Array(2048 * 4);
-let shadeLayout = null;
-let shadeTick = 0;
-
-function descriptionWords(el) {
-  if (el._words && el._lineWidth === el.clientWidth) return el._words;
-  const words = el.textContent.trim().split(/\s+/);
-  const spans = words.map((word, index) => {
-    const span = document.createElement('span');
-    span.textContent = index === words.length - 1 ? word : `${word} `;
-    return span;
-  });
-  el.replaceChildren(...spans);
-  el._lineWidth = el.clientWidth;
-  el._words = spans;
-  return spans;
-}
-
-function bufferX(cssX, canvasBox, bufferWidth) {
-  return Math.min(bufferWidth - 1, Math.max(0, Math.floor(((cssX - canvasBox.left) / canvasBox.width) * bufferWidth)));
-}
-
-function shadeLine(spans, canvasBox, bufferWidth, bufferHeight) {
-  const first = spans[0].getBoundingClientRect();
-  const last = spans[spans.length - 1].getBoundingClientRect();
-  const midY = (first.top + first.bottom) / 2;
-  const x0 = bufferX(first.left, canvasBox, bufferWidth);
-  const x1 = bufferX(last.right, canvasBox, bufferWidth);
-  const width = Math.max(1, x1 - x0);
-  const y = Math.min(bufferHeight - 1, Math.max(0, Math.floor((1 - (midY - canvasBox.top) / canvasBox.height) * bufferHeight)));
-  const words = spans.map((span) => {
-    const rect = span.getBoundingClientRect();
-    const start = Math.max(0, bufferX(rect.left, canvasBox, bufferWidth) - x0);
-    const end = Math.max(start + 1, Math.min(width, bufferX(rect.right, canvasBox, bufferWidth) - x0));
-    return { span, start, end, level: 1 };
-  });
-  return { x0, y, width, words };
-}
-
-function collectShadeLines(canvasBox, bufferWidth, bufferHeight) {
-  const lines = [];
-  experienceCopy.forEach((el) => {
-    const words = descriptionWords(el);
-    let group = [];
-    let lineTop = null;
-    const pushGroup = () => {
-      if (group.length) lines.push(shadeLine(group, canvasBox, bufferWidth, bufferHeight));
-    };
-    words.forEach((span) => {
-      const top = span.offsetTop;
-      if (lineTop !== null && top !== lineTop) pushGroup();
-      if (lineTop !== top) {
-        group = [];
-        lineTop = top;
-      }
-      group.push(span);
-    });
-    pushGroup();
-  });
-  return lines;
-}
-
-function shadeMeasureKey() {
-  let key = 0;
-  experienceCopy.forEach((el) => {
-    const last = el.lastElementChild;
-    key = (key * 33 + el.clientWidth + (last ? last.offsetTop : 0)) | 0;
-  });
-  return key;
-}
-
-function sampleShadeLine(gl, line) {
-  if (shadeRow.length < line.width * 4) shadeRow = new Uint8Array(line.width * 4);
-  gl.readPixels(line.x0, line.y, line.width, 1, gl.RGBA, gl.UNSIGNED_BYTE, shadeRow);
-  line.words.forEach((word) => {
-    const step = Math.max(1, Math.floor((word.end - word.start) / 3));
-    let signal = 0;
-    let count = 0;
-    for (let pixel = word.start; pixel < word.end; pixel += step) {
-      const offset = pixel * 4;
-      signal += (shadeRow[offset] + shadeRow[offset + 1] + shadeRow[offset + 2]) / 765;
-      count += 1;
-    }
-    const current = copyShade.get(word.span) ?? 1;
-    word.level = shadeForBackground(signal / count, current >= 0.5);
-  });
-}
-
-function paintShadeWord(word) {
-  const span = word.span;
-  const current = copyShade.get(span) ?? 1;
-  const next = current + (word.level - current) * 0.2;
-  copyShade.set(span, next);
-  const color = Math.round(next * 255);
-  if (span._shadeValue === color) return;
-  span._shadeValue = color;
-  span.style.color = `rgb(${color}, ${color}, ${color})`;
-}
-
-function storeShadeLayout(bufferWidth, bufferHeight, key) {
-  const canvasBox = canvas.getBoundingClientRect();
-  if (canvasBox.width < 2 || canvasBox.height < 2) return false;
-  shadeLayout = {
-    bufferWidth,
-    bufferHeight,
-    key,
-    lines: collectShadeLines(canvasBox, bufferWidth, bufferHeight)
-  };
-  return true;
-}
-
-function shadeExperienceCopy() {
-  const section = document.getElementById('experience');
-  if (!section.classList.contains('active')) return;
-
-  const gl = renderer.getContext();
-  const bufferWidth = gl.drawingBufferWidth;
-  const bufferHeight = gl.drawingBufferHeight;
-  shadeTick += 1;
-  const bufferChanged = !shadeLayout
-    || shadeLayout.bufferWidth !== bufferWidth
-    || shadeLayout.bufferHeight !== bufferHeight;
-  const sampleFrame = bufferChanged || shadeTick % 3 === 0;
-  const key = sampleFrame ? shadeMeasureKey() : shadeLayout.key;
-  const stale = bufferChanged || shadeLayout.key !== key;
-  if (stale && !storeShadeLayout(bufferWidth, bufferHeight, key)) return;
-  if (stale || sampleFrame) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    shadeLayout.lines.forEach((line) => sampleShadeLine(gl, line));
-  }
-  shadeLayout.lines.forEach((line) => line.words.forEach(paintShadeWord));
-}
-
 const animate = () => {
   requestAnimationFrame(animate);
-  const elapsedTime = clock.getElapsedTime();
-  const deltaTime = elapsedTime - previousTime;
-  previousTime = elapsedTime;
+  const deltaTime = Math.min(clock.getDelta(), 0.05);
+  if (document.hidden) return;
 
   targetMouseSpeed *= 0.95;
   material.uniforms.uMouseSpeed.value += (targetMouseSpeed - material.uniforms.uMouseSpeed.value) * 0.1;
@@ -736,10 +635,14 @@ const animate = () => {
   camera.position.y = cameraRig.y - parallax.y;
   camera.position.z = cameraRig.z;
 
-  material.uniforms.uTime.value = elapsedTime;
+  const motion = getMix();
+  const pace = reduceMotion.matches ? 1 : motion.tapeSpeed;
+  material.uniforms.uTime.value += deltaTime * pace;
+  material.uniforms.uDrive.value += (motion.drive / 20 - material.uniforms.uDrive.value) * 0.12;
+  material.uniforms.uReverb.value += (motion.reverb - material.uniforms.uReverb.value) * 0.12;
   const bend = material.uniforms.uBend.value;
-  if (bend > 0.98 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    material.uniforms.uSpin.value = (material.uniforms.uSpin.value + deltaTime * 0.31) % (Math.PI * 2);
+  if (bend > 0.98 && !reduceMotion.matches) {
+    material.uniforms.uSpin.value = (material.uniforms.uSpin.value + deltaTime * 0.31 * pace) % (Math.PI * 2);
   } else if (bend < 0.02) {
     material.uniforms.uSpin.value = 0;
   }
@@ -771,7 +674,6 @@ const animate = () => {
   }
 
   renderer.render(scene, camera);
-  if (!document.body.classList.contains('studio-open')) shadeExperienceCopy();
   drawContactSpectrum();
 }
 
@@ -781,16 +683,13 @@ const contactSpectrum = document.getElementById('contact-spectrum');
 const contactSpectrumCtx = contactSpectrum.getContext('2d');
 const contactBins = new Uint8Array(FREQUENCY_BINS);
 
-function contactBox() {
-  const host = contactWord.getBoundingClientRect();
-  const ink = contactLabel.getBoundingClientRect();
-  return {
-    text: contactLabel.textContent.toUpperCase(),
-    left: ink.left - host.left,
-    top: ink.top - host.top,
-    width: ink.width,
-    height: ink.height
-  };
+let contactLayout = null;
+
+function applyContactFont(ctx, font, letterSpacing) {
+  ctx.font = font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = letterSpacing;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
 }
 
 function fitContactSpectrum(width, height) {
@@ -800,14 +699,6 @@ function fitContactSpectrum(width, height) {
   if (contactSpectrum.width === pixelWidth && contactSpectrum.height === pixelHeight) return;
   contactSpectrum.width = pixelWidth;
   contactSpectrum.height = pixelHeight;
-}
-
-function useContactFont(ctx) {
-  const style = getComputedStyle(contactLabel);
-  ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  if ('letterSpacing' in ctx) ctx.letterSpacing = style.letterSpacing;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
 }
 
 function contactInkBand(ctx, text, height) {
@@ -873,26 +764,53 @@ function fillContactWord(ctx, box, baseline) {
   ctx.fillText(box.text, 0, baseline);
 }
 
-function drawContactSpectrum() {
-  if (!document.getElementById('contact').classList.contains('active')) return;
-  const box = contactBox();
-  if (box.width < 2 || box.height < 2) return;
-  if (!(isPlaying() && copyFrequency(contactBins))) contactBins.fill(0);
-  contactSpectrum.style.left = `${box.left}px`;
-  contactSpectrum.style.top = `${box.top}px`;
-  contactSpectrum.style.width = `${box.width}px`;
-  contactSpectrum.style.height = `${box.height}px`;
-  fitContactSpectrum(box.width, box.height);
+function placeContactCanvas(host, ink) {
+  contactSpectrum.style.left = `${ink.left - host.left}px`;
+  contactSpectrum.style.top = `${ink.top - host.top}px`;
+  contactSpectrum.style.width = `${ink.width}px`;
+  contactSpectrum.style.height = `${ink.height}px`;
+}
+
+function measureContact() {
+  const style = getComputedStyle(contactLabel);
+  const font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const letterSpacing = style.letterSpacing;
+  const host = contactWord.getBoundingClientRect();
+  const ink = contactLabel.getBoundingClientRect();
+  if (ink.width < 2 || ink.height < 2) return;
+  const text = contactLabel.textContent.toUpperCase();
+  placeContactCanvas(host, ink);
+  fitContactSpectrum(ink.width, ink.height);
   const ctx = contactSpectrumCtx;
-  ctx.setTransform(contactSpectrum.width / box.width, 0, 0, contactSpectrum.height / box.height, 0, 0);
-  ctx.clearRect(0, 0, box.width, box.height);
-  useContactFont(ctx);
-  const band = contactInkBand(ctx, box.text, box.height);
-  fillContactWord(ctx, box, band.baseline);
+  ctx.setTransform(contactSpectrum.width / ink.width, 0, 0, contactSpectrum.height / ink.height, 0, 0);
+  applyContactFont(ctx, font, letterSpacing);
+  contactLayout = {
+    text,
+    width: ink.width,
+    height: ink.height,
+    font,
+    letterSpacing,
+    band: contactInkBand(ctx, text, ink.height)
+  };
+}
+
+function drawContactSpectrum() {
+  if (!contactLayout) return;
+  if (!document.getElementById('contact').classList.contains('active')) return;
+  if (!(isPlaying() && copyFrequency(contactBins))) contactBins.fill(0);
+  const { width, height, text, font, letterSpacing, band } = contactLayout;
+  const ctx = contactSpectrumCtx;
+  ctx.setTransform(contactSpectrum.width / width, 0, 0, contactSpectrum.height / height, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  applyContactFont(ctx, font, letterSpacing);
+  fillContactWord(ctx, { text }, band.baseline);
   ctx.globalCompositeOperation = 'source-atop';
-  paintContactBars(ctx, box.width, band.top, band.bottom);
+  paintContactBars(ctx, width, band.top, band.bottom);
   ctx.globalCompositeOperation = 'source-over';
 }
+
+new ResizeObserver(measureContact).observe(contactLabel);
+document.fonts.ready.then(measureContact);
 
 animate();
 
@@ -902,7 +820,11 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   applyRendererScale();
+  fitSurface();
+  measureContact();
 });
+
+phoneQuery.addEventListener('change', fitSurface);
 
 const donumBtn = document.getElementById('donum-btn');
 let isRisoTheme = false;
@@ -1180,11 +1102,19 @@ mixStudioToggle.addEventListener('click', () => {
   if (location.hash !== '#mix') history.pushState({ studio: true }, '', '#mix');
 });
 
-mixClose.addEventListener('click', () => {
+function leaveStudio() {
   hideStudio();
   if (location.hash === '#mix') {
     history.pushState({ studio: false }, '', location.pathname + location.search);
   }
+}
+
+mixClose.addEventListener('click', leaveStudio);
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !document.body.classList.contains('studio-open')) return;
+  event.preventDefault();
+  leaveStudio();
 });
 
 window.addEventListener('popstate', () => {

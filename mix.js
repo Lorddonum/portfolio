@@ -1,6 +1,7 @@
 import {
     togglePlayback,
     seekToFraction,
+    bindSeekKeys,
     subscribe,
     isPlaying,
     playbackTime,
@@ -14,6 +15,12 @@ import {
     disableMono,
     enableLimiter,
     disableLimiter,
+    trackLabel,
+    useAudioFile,
+    useSessionTrack,
+    isBouncing,
+    startBounce,
+    stopBounce,
     FREQUENCY_BINS,
     WAVEFORM_SAMPLES,
 } from './audioEngine.js';
@@ -44,11 +51,18 @@ function renderSeek() {
     seekBarFill.style.width = `${(current / duration) * 100}%`;
     seekCurrent.textContent = formatTime(current);
     seekTotal.textContent = formatTime(duration);
+    const fraction = current / duration;
+    seekBarTrack.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
+    seekBarTrack.setAttribute('aria-valuetext', formatTime(current));
 }
+
+bindSeekKeys(seekBarTrack);
 
 subscribe((type) => {
     if (type === 'transport') renderTransport();
     if (type === 'time') renderSeek();
+    if (type === 'source') renderTrack();
+    if (type === 'bounce') renderBounce();
 });
 
 playPauseBtn.addEventListener('click', () => {
@@ -242,6 +256,12 @@ function createKnob(containerId, onChangeFn) {
     const indicator = container.querySelector('.knob-indicator');
     const display = container.querySelector('.val-display');
 
+    container.tabIndex = 0;
+    container.setAttribute('role', 'slider');
+    container.setAttribute('aria-label', label);
+    container.setAttribute('aria-valuemin', String(min));
+    container.setAttribute('aria-valuemax', String(max));
+
     let isDragging = false;
     let startY = 0;
     let startVal = val;
@@ -278,6 +298,18 @@ function createKnob(containerId, onChangeFn) {
         fillPath.setAttribute('d', d);
 
         display.textContent = isLog ? formatVal(val) : formatVal(val) + suffix;
+        container.setAttribute('aria-valuenow', String(val));
+        container.setAttribute('aria-valuetext', display.textContent);
+    }
+
+    function normFor(amount) {
+        if (max === min) return 0;
+        if (isLog) {
+            const minLog = Math.log10(min);
+            const maxLog = Math.log10(max);
+            return (Math.log10(Math.max(min, amount)) - minLog) / (maxLog - minLog);
+        }
+        return (amount - min) / (max - min);
     }
 
     function setValFromNormalized(norm) {
@@ -299,15 +331,7 @@ function createKnob(containerId, onChangeFn) {
     }
 
     function initFromDataVal() {
-        let norm = 0;
-        if (isLog) {
-            const minLog = Math.log10(min);
-            const maxLog = Math.log10(max);
-            norm = (Math.log10(val) - minLog) / (maxLog - minLog);
-        } else {
-            norm = (val - min) / (max - min);
-        }
-        updateVisuals(norm);
+        updateVisuals(normFor(val));
     }
 
     svg.addEventListener('mousedown', (e) => {
@@ -324,12 +348,7 @@ function createKnob(containerId, onChangeFn) {
 
         const deltaNorm = deltaY / 200;
 
-        let startNorm = 0;
-        if (isLog) {
-            startNorm = (Math.log10(startVal) - Math.log10(min)) / (Math.log10(max) - Math.log10(min));
-        } else {
-            startNorm = (startVal - min) / (max - min);
-        }
+        const startNorm = normFor(startVal);
 
         let newNorm = Math.max(0, Math.min(1, startNorm + deltaNorm));
         setValFromNormalized(newNorm);
@@ -342,20 +361,25 @@ function createKnob(containerId, onChangeFn) {
         }
     });
 
+    container.addEventListener('keydown', (event) => {
+        const step = event.shiftKey ? 0.01 : 0.05;
+        let next = normFor(val);
+        if (event.key === 'ArrowUp' || event.key === 'ArrowRight') next += step;
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') next -= step;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = 1;
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+        setValFromNormalized(Math.max(0, Math.min(1, next)));
+    });
+
     initFromDataVal();
 
     return {
         setValue: function (newVal) {
             val = Math.max(min, Math.min(max, newVal));
-            let norm = 0;
-            if (isLog) {
-                const minLog = Math.log10(min);
-                const maxLog = Math.log10(max);
-                norm = (Math.log10(val) - minLog) / (maxLog - minLog);
-            } else {
-                norm = (val - min) / (max - min);
-            }
-            updateVisuals(norm);
+            updateVisuals(normFor(val));
             onChangeFn(val);
         }
     };
@@ -451,6 +475,96 @@ limiterToggle.checked = storedMix.limiter;
 limiterToggle.addEventListener('change', (event) => {
     if (event.target.checked) enableLimiter();
     else disableLimiter();
+});
+
+const loadTrack = document.getElementById('load-track');
+const useSession = document.getElementById('use-session');
+const trackName = document.getElementById('track-name');
+const trackFile = document.getElementById('track-file');
+const bounceButton = document.getElementById('bounce-mix');
+
+function renderTrack() {
+    const label = trackLabel();
+    trackName.textContent = label;
+    trackName.title = label;
+    useSession.hidden = label === 'Session';
+}
+
+function renderBounce() {
+    const bouncing = isBouncing();
+    bounceButton.setAttribute('aria-pressed', String(bouncing));
+    bounceButton.textContent = bouncing ? 'Stop' : 'Bounce';
+}
+
+function showTrackNote(note) {
+    trackName.textContent = note;
+    window.setTimeout(renderTrack, 1600);
+}
+
+async function takeTrack(file) {
+    try {
+        const loaded = await useAudioFile(file);
+        if (!loaded) showTrackNote('Use an audio file');
+    } catch (error) {
+        if (error.message !== 'unreadable audio') throw error;
+        showTrackNote('Could not read that file');
+    }
+}
+
+loadTrack.addEventListener('click', () => trackFile.click());
+
+trackFile.addEventListener('change', () => {
+    const file = trackFile.files[0];
+    trackFile.value = '';
+    if (file) takeTrack(file);
+});
+
+useSession.addEventListener('click', () => {
+    useSessionTrack();
+});
+
+let dragDepth = 0;
+
+function fileDrag(event) {
+    return [...event.dataTransfer.types].includes('Files');
+}
+
+mixView.addEventListener('dragenter', (event) => {
+    if (!fileDrag(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    mixView.classList.add('dropping');
+});
+
+mixView.addEventListener('dragover', (event) => {
+    if (!fileDrag(event)) return;
+    event.preventDefault();
+});
+
+mixView.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) mixView.classList.remove('dropping');
+});
+
+mixView.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    mixView.classList.remove('dropping');
+    const file = event.dataTransfer.files[0];
+    if (file) takeTrack(file);
+});
+
+bounceButton.addEventListener('click', async () => {
+    if (isBouncing()) {
+        stopBounce();
+        return;
+    }
+    try {
+        await startBounce();
+    } catch (error) {
+        if (error.message !== 'recording unsupported') throw error;
+        bounceButton.textContent = 'Unavailable';
+    }
 });
 
 let visualsQueued = false;

@@ -288,8 +288,8 @@ button.mix-close {
     display: flex;
     gap: 1.25rem;
     margin-bottom: 1.25rem;
-    height: 104px;
-    flex: 0 0 104px;
+    height: 152px;
+    flex: 0 0 152px;
     align-items: stretch;
 }
 
@@ -310,6 +310,34 @@ button.mix-close {
 .preset-buttons {
     display: flex;
     gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.track-source {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+#track-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 9rem;
+}
+
+.mix-view.dropping {
+    outline: 1px solid rgba(255, 255, 255, 0.45);
+    outline-offset: -8px;
+}
+
+#bounce-mix[aria-pressed="true"] {
+    color: #ff2d78;
+    border-color: #ff2d78;
 }
 
 .preset-btn {
