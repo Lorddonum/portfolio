@@ -485,6 +485,7 @@ function setupScrollAnimations() {
         gsap.set(nextSection, { clearProps: "zIndex" });
         isAnimating = false;
         currentIndex = index;
+        markScrollablePanels();
       }
     });
 
@@ -521,13 +522,31 @@ function setupScrollAnimations() {
     gotoSection(currentIndex + direction, direction);
   }
 
-  function panelCanConsume(direction) {
+  function markScrollablePanels() {
+    sections.forEach((panel) => {
+      if (panel.id === 'about' || panel.id === 'experience') {
+        panel.classList.remove('can-scroll');
+        return;
+      }
+      panel.classList.toggle('can-scroll', panel.scrollHeight - panel.clientHeight > 1);
+    });
+  }
+
+  function activeScroller() {
     const panel = document.querySelector('.panel.active');
-    if (!panel) return false;
-    const max = panel.scrollHeight - panel.clientHeight;
-    if (max <= 1) return false;
-    if (direction > 0) return panel.scrollTop < max - 1;
-    return panel.scrollTop > 1;
+    if (!panel) return null;
+    const el = panel.id === 'about' ? panel.querySelector('.about-content-wrapper') : panel;
+    if (!el || (panel.id !== 'about' && !panel.classList.contains('can-scroll'))) return null;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max <= 1) return null;
+    return { el, max };
+  }
+
+  function panelCanConsume(direction) {
+    const room = activeScroller();
+    if (!room) return false;
+    if (direction > 0) return room.el.scrollTop < room.max - 1;
+    return room.el.scrollTop > 1;
   }
 
   window.addEventListener('wheel', (event) => {
@@ -538,6 +557,9 @@ function setupScrollAnimations() {
   }, { passive: false });
 
   entryAnimations[0](1);
+  markScrollablePanels();
+  document.fonts.ready.then(markScrollablePanels);
+  window.addEventListener('resize', markScrollablePanels);
 
   Observer.create({
     type: "wheel,touch,pointer",
